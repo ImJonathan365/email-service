@@ -39,6 +39,10 @@ dependencies {
 	testRuntimeOnly(libs.junit.platform.launcher)
 }
 
+tasks.bootJar {
+	archiveFileName = "app.jar"
+}
+
 tasks.withType<Test> {
 	useJUnitPlatform()
 	inputs.file("scripts/init-db-roles.sql")
