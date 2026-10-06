@@ -1,0 +1,4 @@
+# Local toolchain for this project (ADR-0009: Java 25 LTS). Gradle's toolchain also requires 25;
+# this makes mise provide it here regardless of the global Java version.
+[tools]
+java = "temurin-25"
