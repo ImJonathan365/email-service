@@ -41,4 +41,7 @@ dependencies {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	inputs.file("scripts/init-db-roles.sql")
+	inputs.files(fileTree("contracts"))
+	systemProperty("contract.update", project.hasProperty("updateContract"))
 }

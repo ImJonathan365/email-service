@@ -4,21 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import com.emailservice.common.persistence.SystemDataSource;
-import com.emailservice.support.IntegrationTestDatabase;
+import com.emailservice.support.IntegrationTest;
 
-@SpringBootTest(properties = { "app.env=local", "app.role=all" })
-class EmailServiceApplicationTests {
-
-	@DynamicPropertySource
-	static void database(DynamicPropertyRegistry registry) {
-		IntegrationTestDatabase.register(registry);
-	}
+class EmailServiceApplicationTests extends IntegrationTest {
 
 	@Autowired
 	JdbcClient tenantJdbc;

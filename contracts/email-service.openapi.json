@@ -1,0 +1,13 @@
+{
+  "components" : { },
+  "info" : {
+    "description" : "Internal transactional email service. See docs/07-api-interna.md.",
+    "title" : "email-service",
+    "version" : "v1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : { },
+  "servers" : [ {
+    "url" : "/"
+  } ]
+}

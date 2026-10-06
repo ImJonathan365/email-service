@@ -13,6 +13,31 @@ spring:
     user: ${app.db.owner.username}
     password: ${app.db.owner.password}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        # AC-24.1: liveness never depends on anything external, readiness only on the database.
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  structured:
+    format:
+      console: ecs
+
 app:
   env: ${APP_ENV:local}
   role: ${APP_ROLE:all}
