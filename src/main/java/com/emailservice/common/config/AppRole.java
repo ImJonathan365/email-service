@@ -4,6 +4,7 @@ import java.util.Locale;
 
 public enum AppRole {
 
+	// TODO(H4): register the /v1 and /webhooks controllers only with APP_ROLE=api|all; worker exposes only Actuator.
 	API, WORKER, ALL, MIGRATE;
 
 	/** Activated only for APP_ROLE=migrate, where no runtime DataSource or web server exists. */
