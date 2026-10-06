@@ -1,7 +1,7 @@
 plugins {
 	java
-	id("org.springframework.boot") version "4.1.1"
-	id("io.spring.dependency-management") version "1.1.7"
+	alias(libs.plugins.spring.boot)
+	alias(libs.plugins.spring.dependency.management)
 }
 
 group = "com.emailservice"
@@ -18,23 +18,25 @@ repositories {
 }
 
 dependencies {
-	implementation("org.springframework.boot:spring-boot-starter-actuator")
-	implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
-	implementation("org.springframework.boot:spring-boot-starter-flyway")
-	implementation("org.springframework.boot:spring-boot-starter-validation")
-	implementation("org.springframework.boot:spring-boot-starter-webmvc")
-	implementation("org.flywaydb:flyway-database-postgresql")
-	runtimeOnly("io.micrometer:micrometer-registry-prometheus")
-	runtimeOnly("org.postgresql:postgresql")
-	testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
-	testImplementation("org.springframework.boot:spring-boot-starter-data-jdbc-test")
-	testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
-	testImplementation("org.springframework.boot:spring-boot-starter-validation-test")
-	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
-	testImplementation("org.springframework.boot:spring-boot-testcontainers")
-	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
-	testImplementation("org.testcontainers:testcontainers-postgresql")
-	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+	implementation(libs.spring.boot.starter.actuator)
+	implementation(libs.spring.boot.starter.data.jdbc)
+	implementation(libs.spring.boot.starter.flyway)
+	implementation(libs.spring.boot.starter.validation)
+	implementation(libs.spring.boot.starter.webmvc)
+	implementation(libs.flyway.database.postgresql)
+	implementation(libs.springdoc.openapi.webmvc.ui)
+	runtimeOnly(libs.micrometer.registry.prometheus)
+	runtimeOnly(libs.postgresql)
+	testImplementation(libs.spring.boot.starter.actuator.test)
+	testImplementation(libs.spring.boot.starter.data.jdbc.test)
+	testImplementation(libs.spring.boot.starter.flyway.test)
+	testImplementation(libs.spring.boot.starter.validation.test)
+	testImplementation(libs.spring.boot.starter.webmvc.test)
+	testImplementation(libs.spring.boot.testcontainers)
+	testImplementation(libs.testcontainers.junit.jupiter)
+	testImplementation(libs.testcontainers.postgresql)
+	testImplementation(libs.archunit.junit5)
+	testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks.withType<Test> {
