@@ -13,15 +13,22 @@ import com.emailservice.common.config.AppRole;
 public class EmailServiceApplication {
 
 	public static void main(String[] args) {
-		SpringApplication application = new SpringApplication(EmailServiceApplication.class);
 		AppRole role = AppRole.parse(new StandardEnvironment().getProperty("APP_ROLE", "all"));
+		SpringApplication application = create(role);
 		if (role == AppRole.MIGRATE) {
 			// Flyway runs during context refresh; then the job exits with the context's exit code.
-			application.setWebApplicationType(WebApplicationType.NONE);
-			application.setAdditionalProfiles(AppRole.MIGRATE_PROFILE);
 			System.exit(SpringApplication.exit(application.run(args)));
 		}
 		application.run(args);
+	}
+
+	static SpringApplication create(AppRole role) {
+		SpringApplication application = new SpringApplication(EmailServiceApplication.class);
+		if (role == AppRole.MIGRATE) {
+			application.setWebApplicationType(WebApplicationType.NONE);
+			application.setAdditionalProfiles(AppRole.MIGRATE_PROFILE);
+		}
+		return application;
 	}
 
 }
