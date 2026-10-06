@@ -16,8 +16,10 @@
 | Rol | Uso | Privilegios |
 |---|---|---|
 | `email_owner` | Migraciones (`APP_ROLE=migrate`) | Dueño del esquema; DDL. Nunca lo usa la app en ejecución |
-| `email_app` | Peticiones de tenant (API) | `SELECT/INSERT/UPDATE/DELETE` sobre tablas de negocio; **sujeto a RLS**; sin DDL |
-| `email_system` | Worker, barridos, purga, webhooks, lookup de API key, administración | `BYPASSRLS`; sin DDL. Solo accesible desde los paquetes permitidos (test de arquitectura) |
+| `email_app` | Peticiones de tenant (API) | `SELECT/INSERT/UPDATE/DELETE` sobre tablas de negocio; **(rev. 2026-10-06)** solo `SELECT` sobre `tenant` (su propia fila); en `suppression`, `SELECT`/`INSERT` por columna sin `source_tenant_id` ni `source_message_id`, y `DELETE`; solo `SELECT`/`INSERT` en `audit_log`; **sujeto a RLS**; sin DDL |
+| `email_system` | Worker, barridos, purga, webhooks, lookup de API key, administración | `BYPASSRLS`; sin DDL. **(rev. 2026-10-06)** `SELECT/INSERT/UPDATE/DELETE` sobre todas las tablas (incluida `tenant`), salvo `UPDATE`/`DELETE` en `audit_log`. Solo accesible desde los paquetes permitidos (test de arquitectura) |
+
+**(rev. 2026-10-06)** Los tres roles los crea `scripts/init-db-roles.sql` (en local, como superusuario al iniciar el contenedor). `BYPASSRLS` se concede ahí y no en una migración, porque `email_owner` no es superusuario. Si el PostgreSQL gestionado no permite `BYPASSRLS`, se usará la alternativa de ADR-0008: una política `TO email_system USING (true)` por tabla.
 
 ## 2. Diagrama
 
@@ -395,28 +397,47 @@ CREATE TABLE email_message (
 
 ```sql
 -- V2__rls.sql (ejecutado por email_owner) — patrón para cada tabla con tenant_id
+-- (rev. 2026-10-06) nullif(): en una conexión reutilizada, tras una transacción con
+-- set_config(..., true), la variable vale '' (no NULL) y ''::uuid daría error en vez de 0 filas.
 ALTER TABLE email_message ENABLE ROW LEVEL SECURITY;
 ALTER TABLE email_message FORCE  ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON email_message
-    USING      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 -- Ídem en api_key, template, template_version, email_event,
 -- rate_limit_counter y audit_log.
+
+-- (rev. 2026-10-06) tenant: cada tenant solo ve su propia fila; nadie la escribe salvo email_system
+ALTER TABLE tenant ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant FORCE  ROW LEVEL SECURITY;
+CREATE POLICY tenant_self ON tenant FOR SELECT
+    USING (id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 -- suppression: el tenant ve las suyas y las globales; solo escribe las suyas
 ALTER TABLE suppression ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suppression FORCE  ROW LEVEL SECURITY;
 CREATE POLICY supp_read ON suppression FOR SELECT
-    USING (scope = 'GLOBAL' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING (scope = 'GLOBAL' OR tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 CREATE POLICY supp_write ON suppression FOR INSERT
-    WITH CHECK (scope = 'TENANT' AND tenant_id = current_setting('app.tenant_id', true)::uuid);
+    WITH CHECK (scope = 'TENANT' AND tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 CREATE POLICY supp_delete ON suppression FOR DELETE
-    USING (scope = 'TENANT' AND tenant_id = current_setting('app.tenant_id', true)::uuid);
+    USING (scope = 'TENANT' AND tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
--- Roles
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO email_app;
-REVOKE UPDATE, DELETE ON audit_log FROM email_app, email_system;
-ALTER ROLE email_system BYPASSRLS;   -- requiere privilegio de superusuario/rol gestionado al crear el rol
+-- Permisos (rev. 2026-10-06)
+GRANT USAGE ON SCHEMA public TO email_app, email_system;
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON api_key, template, template_version, email_message, email_event, rate_limit_counter
+    TO email_app, email_system;
+GRANT SELECT, INSERT ON audit_log TO email_app, email_system;          -- solo inserciones
+GRANT SELECT ON tenant TO email_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tenant TO email_system;
+-- Un tenant no debe saber qué otro tenant originó una supresión global
+GRANT SELECT (id, scope, tenant_id, email, email_hash, reason, note, created_at),
+      INSERT (id, scope, tenant_id, email, email_hash, reason, note, created_at),
+      DELETE
+    ON suppression TO email_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON suppression TO email_system;
+-- BYPASSRLS de email_system: en scripts/init-db-roles.sql (requiere superusuario), no aquí.
 ```
 
 En cada transacción de tenant, la aplicación ejecuta primero `SELECT set_config('app.tenant_id', :tenantId, true)` (el valor vive solo hasta el fin de la transacción; un pool de conexiones no puede filtrarlo a otra petición).

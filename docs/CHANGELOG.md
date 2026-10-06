@@ -2,6 +2,16 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-06 — H1: esquema, roles y RLS
+
+- **Decisiones (owner, 2026-10-06):**
+  - `BYPASSRLS` de `email_system` se concede en `scripts/init-db-roles.sql` (requiere superusuario), no en `V2__rls.sql`. Si el PostgreSQL gestionado no lo permite, se usará la alternativa de ADR-0008 (política `TO email_system USING (true)`).
+  - `tenant` pasa a tener RLS con `FORCE` (política `id = app.tenant_id`). `email_app` solo tiene `SELECT` sobre su propia fila; el alta, la modificación y el borrado de tenants solo se hacen con `email_system`.
+  - `email_system` tiene `SELECT/INSERT/UPDATE/DELETE` sobre todas las tablas, salvo `UPDATE`/`DELETE` en `audit_log`.
+  - En `suppression`, `email_app` no puede leer `source_tenant_id` ni `source_message_id` (permisos por columna): un tenant no sabe qué otro tenant originó una supresión global.
+  - Las políticas usan `nullif(current_setting('app.tenant_id', true), '')::uuid`: en una conexión reutilizada, tras una transacción con `set_config(..., true)`, la variable vale `''` y no `NULL`, y `''::uuid` daría error en lugar de 0 filas.
+- **Hecho:** `docs/06` §1 y §5 actualizados con lo anterior.
+
 ## 2026-10-05 (tarde) — Respuestas del owner: H0 cerrado
 
 - **Decisiones:**
