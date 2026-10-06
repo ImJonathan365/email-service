@@ -2,6 +2,7 @@ package com.emailservice;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,29 +10,31 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.emailservice.common.persistence.SystemDataSource;
 import com.emailservice.support.IntegrationTestDatabase;
+import com.emailservice.support.PostgresTestDatabase;
 
-@SpringBootTest(properties = { "app.env=local", "app.role=all" })
-class EmailServiceApplicationTests {
+/** NFR-09: production api/worker instances start without owner credentials and never migrate. */
+@SpringBootTest(properties = { "app.env=production", "app.role=api" })
+class ProductionRoleStartupTests {
+
+	@BeforeAll
+	static void migrateAsTheDeployJobWould() {
+		PostgresTestDatabase.migrate();
+	}
 
 	@DynamicPropertySource
 	static void database(DynamicPropertyRegistry registry) {
 		IntegrationTestDatabase.register(registry);
+		registry.add("app.db.owner.username", () -> "");
+		registry.add("app.db.owner.password", () -> "");
 	}
 
 	@Autowired
 	JdbcClient tenantJdbc;
 
-	@Autowired
-	@SystemDataSource
-	JdbcClient systemJdbc;
-
 	@Test
-	void connectsWithTheRuntimeRolesToTheMigratedSchema() {
-		assertThat(systemJdbc.sql("SELECT current_user").query(String.class).single()).isEqualTo("email_system");
+	void startsWithoutOwnerCredentials() {
 		assertThat(tenantJdbc.sql("SELECT current_user").query(String.class).single()).isEqualTo("email_app");
-		assertThat(systemJdbc.sql("SELECT count(*) FROM email_message").query(Long.class).single()).isNotNull();
 	}
 
 }

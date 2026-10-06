@@ -1,3 +1,29 @@
 spring:
   application:
     name: email-service
+  threads:
+    virtual:
+      enabled: true
+  autoconfigure:
+    exclude:
+      # Both DataSources are defined explicitly (ADR-0008), and APP_ROLE=migrate has none.
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+  flyway:
+    url: ${app.db.url}
+    user: ${app.db.owner.username}
+    password: ${app.db.owner.password}
+
+app:
+  env: ${APP_ENV:local}
+  role: ${APP_ROLE:all}
+  db:
+    url: ${DB_URL:}
+    app:
+      username: ${DB_APP_USER:}
+      password: ${DB_APP_PASSWORD:}
+    system:
+      username: ${DB_SYSTEM_USER:}
+      password: ${DB_SYSTEM_PASSWORD:}
+    owner:
+      username: ${DB_OWNER_USER:}
+      password: ${DB_OWNER_PASSWORD:}
