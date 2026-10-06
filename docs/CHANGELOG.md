@@ -10,7 +10,16 @@ Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
   - `email_system` tiene `SELECT/INSERT/UPDATE/DELETE` sobre todas las tablas, salvo `UPDATE`/`DELETE` en `audit_log`.
   - En `suppression`, `email_app` no puede leer `source_tenant_id` ni `source_message_id` (permisos por columna): un tenant no sabe qué otro tenant originó una supresión global.
   - Las políticas usan `nullif(current_setting('app.tenant_id', true), '')::uuid`: en una conexión reutilizada, tras una transacción con `set_config(..., true)`, la variable vale `''` y no `NULL`, y `''::uuid` daría error en lugar de 0 filas.
-- **Hecho:** `docs/06` §1 y §5 actualizados con lo anterior.
+- **Hecho:**
+  - `docs/06` §1 y §5 actualizados con lo anterior.
+  - H1 (esqueleto):
+    - `APP_ROLE` con validación de configuración al arrancar;
+    - los dos `DataSource` y `set_config` por transacción de tenant;
+    - V1/V2 y el script de roles;
+    - health (liveness/readiness), Swagger y `contracts/email-service.openapi.json` con test de diferencias;
+    - ArchUnit, Docker Compose y CI (build, tests, gitleaks).
+  - **RSS medido (ADR-0009):** 300 MiB (306 896 KiB, ≈ 314 MB) en reposo con `-Xmx256m`, `APP_ROLE=all`, imagen `eclipse-temurin:25-jre`. Cumple el criterio de ≤ 350 MB.
+- **Pendiente:** el resto de validaciones de configuración y los indicadores `provider`/`queue` llegan con el hito que los usa (H2–H7).
 
 ## 2026-10-05 (tarde) — Respuestas del owner: H0 cerrado
 
