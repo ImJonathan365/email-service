@@ -16,7 +16,7 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * Checks a message's variables against its template's schema (AC-06.2). Undeclared variables are
- * allowed, as in JSON Schema, but templates can only use declared ones (the engine rejects others).
+ * allowed and ignored, as in JSON Schema.
  */
 public final class VariablesValidator {
 
