@@ -44,8 +44,25 @@ tasks.bootJar {
 }
 
 tasks.withType<Test> {
-	useJUnitPlatform()
 	inputs.file("scripts/init-db-roles.sql")
 	inputs.files(fileTree("contracts"))
 	systemProperty("contract.update", project.hasProperty("updateContract"))
+}
+
+tasks.test {
+	useJUnitPlatform {
+		excludeTags("benchmark")
+	}
+}
+
+tasks.register<Test>("benchmarkRls") {
+	description = "Measures the latency cost of RLS on tenant queries (ADR-0008)."
+	group = "verification"
+	testClassesDirs = sourceSets.test.get().output.classesDirs
+	classpath = sourceSets.test.get().runtimeClasspath
+	useJUnitPlatform {
+		includeTags("benchmark")
+	}
+	outputs.upToDateWhen { false }
+	testLogging.showStandardStreams = true
 }
