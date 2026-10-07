@@ -222,7 +222,7 @@ Unicidad: `UNIQUE (email_hash) WHERE scope = 'GLOBAL'` y `UNIQUE (tenant_id, ema
 
 ### 3.8 `audit_log`
 
-`id`, `tenant_id` NULL, `actor_type` (`ADMIN`,`API_KEY`,`SYSTEM`), `actor_id` NULL, `action` (p. ej. `API_KEY_REVOKED`, `TENANT_PAUSED`, `DATA_SUBJECT_ERASED`), `resource_type`, `resource_id`, `ip`, `request_id`, `metadata` `jsonb`, `created_at`. Índice `(tenant_id, created_at DESC)`. Solo inserciones: `email_app` y `email_system` tienen `INSERT` y `SELECT`, no `UPDATE`/`DELETE`; la purga la ejecuta una función `SECURITY DEFINER` propiedad de `email_owner`.
+`id`, `tenant_id` NULL, `actor_type` (`ADMIN`,`API_KEY`,`SYSTEM`), `actor_id` NULL (**(rev. 2026-10-06)** id de la API key, o `admin:<12 hex>` = huella SHA-256 de la credencial de administración usada; nunca la credencial), `action` (p. ej. `API_KEY_REVOKED`, `TENANT_PAUSED`, `DATA_SUBJECT_ERASED`), `resource_type`, `resource_id`, `ip`, `request_id`, `metadata` `jsonb`, `created_at`. Índice `(tenant_id, created_at DESC)`. Solo inserciones: `email_app` y `email_system` tienen `INSERT` y `SELECT`, no `UPDATE`/`DELETE`; la purga la ejecuta una función `SECURITY DEFINER` propiedad de `email_owner`.
 
 ### 3.9 `rate_limit_counter`
 

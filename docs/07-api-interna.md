@@ -302,7 +302,13 @@ svix-signature: v1,k8s9…
 }
 ```
 
-**Revocar** — `DELETE /admin/v1/api-keys/{id}` → `204`.
+**Revocar** — `DELETE /admin/v1/api-keys/{id}` → `204` (idempotente: revocar una key ya revocada también da `204`; un id inexistente, `404 RESOURCE_NOT_FOUND`).
+
+**(rev. 2026-10-06) Comportamiento implementado en H2:**
+- `PATCH /admin/v1/tenants/{slug}` es una actualización parcial: un campo ausente o `null` conserva su valor (por eso `replyTo` no se puede vaciar con un `PATCH`). Las listas (`allowedFromDomains`, `allowedLinkHosts`) se sustituyen completas y se normalizan a minúsculas. `status` admite `ACTIVE` o `SUSPENDED`.
+- `GET /admin/v1/tenants` y `GET /admin/v1/tenants/{slug}/api-keys` responden `{"data": [...], "nextCursor": null}`.
+- Todo acceso a `/admin/v1/**` queda en auditoría: las modificaciones con su acción (`TENANT_CREATED`, `TENANT_UPDATED` con los nombres de los campos cambiados, `TENANT_SUSPENDED`, `TENANT_REACTIVATED`, `API_KEY_ISSUED`, `API_KEY_REVOKED`), las lecturas como `ADMIN_ACCESS` y los rechazos como `ADMIN_ACCESS_DENIED`.
+- Una ruta que existe con otro método responde `404 RESOURCE_NOT_FOUND`, porque el catálogo cerrado no tiene código para `405` (pendiente de decisión del owner).
 
 **Levantar pausa** — `POST /admin/v1/tenants/colmena/resume-sending` `{ "note": "pico legítimo: aviso de mantenimiento" }` → `200`.
 

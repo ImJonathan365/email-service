@@ -2,6 +2,34 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-06 (tarde) — H2: tenancy
+
+- **Hecho:**
+  - Errores `application/problem+json` con el catálogo cerrado de `07` §11; `X-Request-Id` en toda respuesta; IP de origen con `TRUSTED_PROXIES`.
+  - Administración (FR-02): `X-Admin-Key` contra `ADMIN_API_KEYS`; crear, listar, actualizar, suspender y reactivar tenants; valores por defecto de AC-02.5.
+  - API keys (FR-03, FR-33): emisión `esk_{env}_{prefix}_{secret}` (solo prefijo y SHA-256 en la BD), listado sin secretos, revocación idempotente, ámbitos y CIDR fijados al emitir.
+  - Autenticación de `/v1/**` (FR-01, FR-33): comparación en tiempo constante, `401` uniforme, `403` por ámbito, CIDR o tenant suspendido, `last_used_at` por minuto y contexto de tenant (RLS) para el resto de la petición. `@RequiresScope` es obligatorio en cada handler `/v1`.
+  - Auditoría (FR-22) en la misma transacción que la acción.
+  - OpenAPI en dos grupos (AC-25.3): `contracts/email-service.openapi.json` (productos) y `contracts/email-service-admin.openapi.json`.
+  - `APP_ROLE=migrate` arranca un contexto mínimo (solo configuración y Flyway).
+  - `scripts/seed-local.sh`: tenant `demo` y dos keys.
+- **Medido: coste de RLS (ADR-0008)** con `./gradlew benchmarkRls`. PostgreSQL 18 en Docker local, 100 000 mensajes en 20 tenants, 5 000 transacciones por caso, dos ejecuciones. El plan sigue usando `ix_msg_tenant_created`; la política queda como un único `One-Time Filter`.
+
+  | Consulta (p50, µs por transacción) | `email_app` + `set_config` + RLS | `email_system` + `set_config` | `email_system` solo consulta |
+  |---|---|---|---|
+  | Últimos 20 del tenant | 144–158 | 133–137 | 91–92 |
+  | Por tenant + id | 127–128 | 119–122 | 82–91 |
+
+  - El ida y vuelta extra de `set_config` cuesta ~30–45 µs (+40–45 % sobre consultas tan pequeñas).
+  - La evaluación de la política sola cuesta +5–15 % en p50.
+  - p95/p99 son ruidosos en este entorno.
+  - En total, +40–65 µs por transacción: ~3–5 % del camino de aceptación medido (1,38 ms, `04` §2).
+- **Pendiente de decisión del owner:**
+  - si ese resultado activa el criterio de revisión de ADR-0008 (> 20 %, cumplido por la consulta aislada, no por la transacción de aceptación);
+  - código de error para `405` (hoy `404 RESOURCE_NOT_FOUND`);
+  - sin caché de API keys (`08` §2 revisado);
+  - auditoría agregada y rate limit de `401` por IP, previstos para H7.
+
 ## 2026-10-06 — H1: esquema, roles y RLS
 
 - **Decisiones (owner, 2026-10-06):**

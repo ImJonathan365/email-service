@@ -31,7 +31,8 @@ Reglas:
 - **Almacenamiento:** `key_prefix` en claro (para el lookup) y `SHA-256(secret)` en `key_hash`. Con 256 bits de entropía real, SHA-256 basta y evita el coste de Argon2 en cada petición; no es una contraseña humana. (Si algún día se emiten claves de baja entropía, cambiar a Argon2id → requiere ADR.)
 - **Comparación en tiempo constante** (`MessageDigest.isEqual`), nunca `String.equals`.
 - El prefijo permite identificar una clave filtrada en un log o repositorio sin exponer el secreto.
-- Caché en memoria de las claves validadas con TTL ≤ 60 s, para no golpear la base de datos en cada petición; la revocación se hace efectiva en ≤ 60 s (AC-03.4).
+- ~~Caché en memoria de las claves validadas con TTL ≤ 60 s~~ **(rev. 2026-10-06)** Sin caché en el MVP: el lookup por prefijo es una lectura indexada por petición (barata a este volumen) y la revocación es inmediata, más estricto que AC-03.4. Se añadiría una caché (TTL ≤ 60 s) solo si la latencia de autenticación lo justifica con una medida.
+- **(rev. 2026-10-06)** Los fallos con una key desconocida o mal formada no se auditan uno a uno (permitiría inundar `audit_log`); la auditoría agregada por IP y el rate limit de `401` llegan con H7. Sí se auditan los rechazos de keys conocidas: revocada, expirada, fuera de `allowedCidrs` o de un tenant suspendido.
 - **Ámbitos** (`emails:send`, `emails:read`, `templates:write`, `suppressions:write`): la key desplegada en un producto solo lleva `emails:send` y `emails:read` (FR-33).
 - **Origen:** `allowedCidrs` por key cuando el hosting da IP de salida estables.
 

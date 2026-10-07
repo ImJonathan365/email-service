@@ -154,7 +154,7 @@ Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisor
 | `DB_APP_USER` / `DB_APP_PASSWORD` | — | Rol `email_app` (RLS) |
 | `DB_SYSTEM_USER` / `DB_SYSTEM_PASSWORD` | — | Rol `email_system` (worker, webhooks, admin) |
 | `DB_OWNER_USER` / `DB_OWNER_PASSWORD` | — | Rol `email_owner`, solo con `APP_ROLE=migrate` |
-| `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default) |
+| `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default). **(rev. 2026-10-06)** Solo se exige con `APP_ROLE=api\|all` (el worker y `migrate` nunca la reciben); cada una de ≥ 32 caracteres |
 | `TRUSTED_PROXIES` | *(vacío)* | CIDR de proxies cuya `X-Forwarded-For` se acepta |
 | `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop` |
 | `RESEND_API_KEY` | — | Solo si `MAIL_PROVIDER=resend` |
