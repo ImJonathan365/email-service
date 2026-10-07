@@ -25,6 +25,10 @@ public final class TestHttp {
 		return new Request("POST", path);
 	}
 
+	public Request put(String path) {
+		return new Request("PUT", path);
+	}
+
 	public Request patch(String path) {
 		return new Request("PATCH", path);
 	}

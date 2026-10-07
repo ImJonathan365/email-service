@@ -229,8 +229,38 @@ email-service/
 │   ├── db/migration/             # Flyway V1__core.sql, V2__rls.sql, …
 │   └── application.yaml
 ├── src/test/java/…               # unitarios + integración (Testcontainers con roles/RLS, WireMock) + ArchUnit
+├── templates/                    # (rev. 2026-10-06) plantillas como código: {tenant}/{templateKey}/ (§9)
 └── scripts/
     ├── init-db-roles.sql         # crea email_owner, email_app, email_system (local)
     ├── seed-local.sh             # tenant demo + API keys (envío y plantillas) + plantilla de ejemplo
+    ├── publish-template.sh       # (rev. 2026-10-06) publica una plantilla de templates/ (§9)
     └── smoke-test.sh             # envío de prueba de extremo a extremo contra Mailpit
 ```
+
+## 9. Plantillas como código (rev. 2026-10-06)
+
+Las plantillas de cada producto se versionan en este repositorio y se publican con un script a través de la API. Nadie edita HTML en producción a mano, y cada cambio pasa por revisión y por CI.
+
+**Estructura** — `templates/{tenant}/{templateKey}/`:
+
+| Archivo | Contenido |
+|---|---|
+| `template.json` | `key` (igual al nombre de la carpeta), `name`, `description`, `category`, `trackingEnabled`, `subject` (un asunto por locale), `variablesSchema` (subconjunto de `06` §3.3) y `previewVariables` (datos de ejemplo, ficticios, para la previsualización) |
+| `{locale}.html` | Cuerpo HTML; uno por cada locale de `subject` (obligatorio) |
+| `{locale}.txt` | Alternativa en texto plano (opcional) |
+
+Ejemplo: `templates/demo/password-reset/` (`es-CR` y `en`).
+
+**Publicar** — `EMAIL_SERVICE_TEMPLATES_KEY=esk_... [BASE_URL=...] scripts/publish-template.sh {tenant} {templateKey}`:
+
+1. La key debe pertenecer al tenant y tener `templates:write` y `emails:read`; es la key de operador, nunca la de un producto (FR-33).
+2. Si la plantilla no existe, la crea. Si existe con otra categoría, falla: cambiar la categoría exige una plantilla nueva (AC-36.4).
+3. Compara cada locale con su versión publicada (asunto, HTML, texto y esquema) y omite los que no cambiaron. Repetir el script sin cambios no crea versiones.
+4. Crea un borrador por cada locale cambiado y lo previsualiza con `previewVariables`, con las mismas reglas que un envío real (esquema, escapado, `allowedLinkHosts`).
+5. Solo si todas las previsualizaciones pasan, publica los borradores. Si algo falla, borra los borradores que creó y termina con error mostrando el `problem+json`. Las versiones que ya llegó a publicar siguen publicadas, porque la publicación no se deshace.
+
+Requiere `curl` y `jq` (`jq` está declarado en `mise.toml`). `scripts/seed-local.sh` publica todas las plantillas de `templates/{slug}/` del tenant de demo.
+
+**En CI**, `TemplatesAsCodeTest` pasa cada `template.json` por las mismas comprobaciones que el servicio al guardar, publicar y previsualizar. Una plantilla rota falla el build antes de llegar al script.
+
+**Limitación conocida (AC-37.6):** publicar exige que todos los locales publicados declaren las mismas variables `required`, y se publica un locale cada vez. Por eso no se puede cambiar el conjunto `required` de una plantilla que ya tiene varios locales publicados: el primero en publicarse choca con el otro. Hoy la salida es crear una plantilla con otra `key`, o añadir variables opcionales. Pendiente de decisión del owner.

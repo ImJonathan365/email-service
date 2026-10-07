@@ -3,6 +3,8 @@ spring-boot = "4.1.1"
 spring-dependency-management = "1.1.7"
 springdoc = "3.1.1"
 archunit = "1.5.1"
+handlebars = "4.5.5"
+jsoup = "1.23.2"
 
 [libraries]
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
@@ -14,6 +16,8 @@ flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
 postgresql = { module = "org.postgresql:postgresql" }
 springdoc-openapi-webmvc-ui = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
+handlebars = { module = "com.github.jknack:handlebars", version.ref = "handlebars" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 
 spring-boot-starter-actuator-test = { module = "org.springframework.boot:spring-boot-starter-actuator-test" }
 spring-boot-starter-data-jdbc-test = { module = "org.springframework.boot:spring-boot-starter-data-jdbc-test" }

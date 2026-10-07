@@ -422,6 +422,6 @@ Una tarea del worker evalúa cada 5 minutos, por tenant:
 - **AC-37.2** — *Dado* `POST /v1/emails` con `locale = "en"` y una versión publicada en `en`, *entonces* se fija esa versión y la respuesta lleva `locale = "en"`.
 - **AC-37.3** — *Dado* `locale = "en"` sin versión publicada en `en`, *entonces* se usa `tenant.locale` (default `es-CR`), la respuesta indica el `locale` efectivo y se incrementa `email_locale_fallback_total`. Sin versión publicada tampoco en `tenant.locale` → `422 TEMPLATE_NOT_PUBLISHED`.
 - **AC-37.4** — Sin `locale` en la petición se usa `tenant.locale`.
-- **AC-37.5** — `formatDate`, `formatNumber` y `formatMoney` usan el locale efectivo del mensaje y `tenant.timezone`. Test: `formatMoney 1500 "CRC"` produce `₡1 500,00` en `es-CR` y `CRC 1,500.00` en `en` (el formato exacto lo fija la librería de la JDK; el test lo congela).
+- **AC-37.5** — `formatDate`, `formatNumber` y `formatMoney` usan el locale efectivo del mensaje y `tenant.timezone`. Test: `formatMoney 1500 "CRC"` produce `₡1 500,00` en `es-CR` y `CRC1,500.00` en `en` (el formato exacto lo fija la librería de la JDK; el test lo congela). **(rev. 2026-10-06)** Congelado con la JDK 25: en `es-CR` el separador de miles es un espacio de no separación (U+00A0), y en `en` no hay espacio entre `CRC` y la cifra.
 - **AC-37.6** — Publicar una versión cuyo `required` difiere del de la versión publicada en otro locale → `422 VALIDATION_ERROR` (todas las traducciones aceptan las mismas variables).
 - **AC-37.7** — En el lote (FR-35) cada elemento puede llevar su propio `locale`.

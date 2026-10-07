@@ -68,5 +68,6 @@ choose the most conservative option and leave `// TODO(owner-decision): …` lis
   `set -a; source .env; set +a; APP_ROLE=migrate ./gradlew bootRun`
 - Tests: `./gradlew test` (Docker required: Testcontainers)
 - RLS cost benchmark (ADR-0008/0019): `./gradlew benchmarkRls`
-- Seed local tenant + API keys + template: `./scripts/seed-local.sh`
+- Seed local tenant + API keys + templates: `./scripts/seed-local.sh` (needs `jq`, declared in `mise.toml`)
+- Publish a template kept as code: `EMAIL_SERVICE_TEMPLATES_KEY=esk_... ./scripts/publish-template.sh {tenant} {templateKey}` (docs/05 §9)
 - End-to-end smoke test: `./scripts/smoke-test.sh`

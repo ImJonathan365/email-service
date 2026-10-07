@@ -1,0 +1,6 @@
+Hola {{firstName}}:
+
+Recibimos una solicitud para restablecer tu contraseña. Ábrela aquí:
+{{resetUrl}}
+
+El enlace vence en {{expiresInMinutes}} minutos. Si no lo solicitaste, puedes ignorar este correo.

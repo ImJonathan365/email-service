@@ -1,5 +1,315 @@
 {
   "components" : {
+    "schemas" : {
+      "CreateTemplate" : {
+        "properties" : {
+          "category" : {
+            "enum" : [ "SECURITY", "TRANSACTIONAL", "NOTICE" ],
+            "pattern" : "SECURITY|TRANSACTIONAL|NOTICE",
+            "type" : "string"
+          },
+          "description" : {
+            "maxLength" : 1000,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "key" : {
+            "example" : "password-reset",
+            "maxLength" : 64,
+            "minLength" : 0,
+            "pattern" : "[a-z0-9]+(-[a-z0-9]+)*",
+            "type" : "string"
+          },
+          "name" : {
+            "example" : "Password reset",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "trackingEnabled" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "category", "key", "name" ],
+        "type" : "object"
+      },
+      "ListResponseTemplateSummary" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TemplateSummary"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Preview" : {
+        "properties" : {
+          "html" : {
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "subject" : {
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "text" : {
+            "type" : "string"
+          },
+          "warnings" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "PreviewRequest" : {
+        "properties" : {
+          "locale" : {
+            "example" : "es-CR",
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "variables" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "PublishedVersion" : {
+        "properties" : {
+          "locale" : {
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "Template" : {
+        "properties" : {
+          "category" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "trackingEnabled" : {
+            "type" : "boolean"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "TemplateDetail" : {
+        "properties" : {
+          "category" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "trackingEnabled" : {
+            "type" : "boolean"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "versions" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Version"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "TemplateSummary" : {
+        "properties" : {
+          "category" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "published" : {
+            "items" : {
+              "$ref" : "#/components/schemas/PublishedVersion"
+            },
+            "type" : "array"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "trackingEnabled" : {
+            "type" : "boolean"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Version" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "htmlTemplate" : {
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "publishedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "subjectTemplate" : {
+            "type" : "string"
+          },
+          "textTemplate" : {
+            "type" : "string"
+          },
+          "variablesSchema" : {
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "VersionContent" : {
+        "properties" : {
+          "htmlTemplate" : {
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "locale" : {
+            "example" : "es-CR",
+            "type" : "string"
+          },
+          "subjectTemplate" : {
+            "example" : "{{firstName}}, restablece tu contraseña",
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "textTemplate" : {
+            "type" : "string"
+          },
+          "variablesSchema" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "htmlTemplate", "subjectTemplate" ],
+        "type" : "object"
+      },
+      "VersionCreated" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
+      "VersionPublished" : {
+        "properties" : {
+          "locale" : {
+            "type" : "string"
+          },
+          "publishedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      }
+    },
     "securitySchemes" : {
       "adminKey" : {
         "description" : "One of ADMIN_API_KEYS; private network only",
@@ -20,7 +330,285 @@
     "version" : "v1"
   },
   "openapi" : "3.1.0",
-  "paths" : { },
+  "paths" : {
+    "/v1/templates" : {
+      "get" : {
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseTemplateSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "List templates with their published versions (FR-04)",
+        "tags" : [ "Templates" ]
+      },
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTemplate"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Template"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Create a template (FR-04)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}" : {
+      "get" : {
+        "operationId" : "detail",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TemplateDetail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Template detail with every version and its content (FR-04)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/preview" : {
+      "post" : {
+        "operationId" : "preview",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Preview"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Render a version with sample variables without sending anything (FR-06)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/versions" : {
+      "post" : {
+        "operationId" : "createVersion",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VersionContent"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VersionCreated"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Create a draft version for one locale (FR-04, FR-37)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/versions/{version}" : {
+      "delete" : {
+        "operationId" : "deleteVersion",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "version",
+          "required" : true,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Delete a draft version (AC-04.3)",
+        "tags" : [ "Templates" ]
+      },
+      "put" : {
+        "operationId" : "updateVersion",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "version",
+          "required" : true,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VersionContent"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VersionCreated"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Replace a draft version; published versions are immutable (AC-04.3)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/versions/{version}/publish" : {
+      "post" : {
+        "operationId" : "publish",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "version",
+          "required" : true,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VersionPublished"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Publish a draft; it becomes immutable and archives the previous one of its locale (FR-05)",
+        "tags" : [ "Templates" ]
+      }
+    }
+  },
   "servers" : [ {
     "url" : "/"
   } ]

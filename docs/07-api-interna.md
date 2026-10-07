@@ -30,6 +30,7 @@ Swagger UI: `/swagger-ui.html` · OpenAPI: `/v3/api-docs/public` y `/v3/api-docs
 | `GET` | `/v1/templates/{key}` | Detalle + versiones | `emails:read` | FR-04 |
 | `POST` | `/v1/templates/{key}/versions` | Crear versión (borrador) | `templates:write` | FR-04 |
 | `PUT` | `/v1/templates/{key}/versions/{version}` | Editar borrador | `templates:write` | FR-04 |
+| `DELETE` | `/v1/templates/{key}/versions/{version}` | Borrar borrador (rev. 2026-10-06, AC-04.3) | `templates:write` | FR-04 |
 | `POST` | `/v1/templates/{key}/versions/{version}/publish` | Publicar (inmutable) | `templates:write` | FR-05 |
 | `POST` | `/v1/templates/{key}/preview` | Renderizar sin enviar | `templates:write` | FR-06 |
 | `GET` | `/v1/suppressions` | Listar supresiones (propias + globales enmascaradas) | `emails:read` | FR-18 |
@@ -222,14 +223,31 @@ Incluye `renderedSubject` / `renderedHtml` solo si el tenant tiene `storeRendere
 ```
 
 ```json
-{ "subject": "Ana, restablece tu contraseña de Colmena", "html": "<html>…</html>", "text": "Hola Ana…", "warnings": [] }
+{ "templateVersion": 4, "locale": "es-CR", "status": "DRAFT",
+  "subject": "Ana, restablece tu contraseña de Colmena", "html": "<html>…</html>", "text": "Hola Ana…", "warnings": [] }
 ```
+
+**(rev. 2026-10-06) Comportamiento implementado en H3:**
+- **Previsualización:**
+  - `templateVersion` puede ser un borrador; así se comprueba antes de publicar.
+  - Sin `templateVersion` se usa la versión publicada del `locale` pedido (opcional); si no hay, la del `tenant.locale`; si tampoco, `422 TEMPLATE_NOT_PUBLISHED`.
+  - Aplica las mismas reglas que un envío: variables contra el esquema (`422 TEMPLATE_VARIABLES_INVALID`), variables URL `https` en `allowedLinkHosts` (`422 UNSAFE_URL`) y errores de render (`422 TEMPLATE_VARIABLES_INVALID`, sin repetir el valor).
+  - No crea mensajes ni envía nada.
+- **Lectura:**
+  - `GET /v1/templates` devuelve `{"data": [...]}` con `published: [{version, locale}]` por plantilla.
+  - `GET /v1/templates/{key}` incluye el contenido de cada versión (`subjectTemplate`, `htmlTemplate`, `textTemplate`, `variablesSchema`), para que las herramientas detecten si un locale cambió.
+- **Borradores:**
+  - `DELETE /v1/templates/{key}/versions/{version}` borra un borrador (`204`); sobre una versión publicada o archivada, `409 VERSION_IMMUTABLE`.
+  - `locale` es `es-CR` por defecto al crear una versión.
+- **Variables:** las no declaradas en `variablesSchema` se aceptan y se ignoran, como en JSON Schema.
+- **Linter HTML:** además de `href` y `src`, exige `format: uri` en todos los atributos de URL (`srcset`, `background`, `poster`, `action`, `formaction`, `cite`, `data`, `longdesc`, `usemap`, `xlink:href`). Como el correo lleva la fuente tal cual, revisa también las etiquetas mal ubicadas que un parser HTML5 descartaría.
+- **Escapado del asunto:** el asunto pierde `\r` y `\n` (se eliminan, sin sustituirlos por espacios).
 
 **Reglas de plantilla (rev. 2026-10, ADR-0011):**
 - Handlebars *logic-less*. `{{variable}}` escapa HTML **solo** en `htmlTemplate`; en `subjectTemplate` y `textTemplate` no hay escapado HTML (el asunto además pierde CR/LF).
 - Se rechazan con `422 UNSAFE_TEMPLATE_CONSTRUCT`: `{{{ }}}`, `{{& }}`, parciales (`{{> }}`), cualquier helper fuera de la lista blanca, variables dentro de `<script>`, `<style>`, `style=`, `on*=` o atributos sin comillas, y etiquetas `<script>`, `<iframe>`, `<object>`, `<embed>` y `<form>`.
 - Toda variable en `href`/`src` debe declararse con `"format": "uri"`.
-- Helpers permitidos: `if`, `unless`, `each`, `with`, `formatDate value [pattern]`, `formatNumber value [decimals]` y `formatMoney value currency` (`CRC`, `USD`). Usan el locale efectivo del mensaje (`es-CR` o `en`) y `tenant.timezone`; no existe un helper de "fecha actual" (el render debe ser determinista).
+- Helpers permitidos: `if`, `unless`, `each`, `with`, `formatDate value [pattern]`, `formatNumber value [decimals]` y `formatMoney value currency` (`CRC`, `USD`). **(rev. 2026-10-06)** `formatDate` acepta una fecha (`2026-10-12`) o una fecha y hora con zona (ISO-8601); `pattern` es `short`, `medium` (por defecto), `long`, `full` o un patrón de `DateTimeFormatter`. `formatNumber` admite de 0 a 6 decimales. No se admiten parámetros con nombre (`key=value`), subexpresiones ni parámetros de bloque (`as |x|`). Usan el locale efectivo del mensaje (`es-CR` o `en`) y `tenant.timezone`; no existe un helper de "fecha actual" (el render debe ser determinista).
 - Seguimiento de aperturas y clics: solo en categoría `NOTICE` y solo si `trackingEnabled = true`.
 
 ## 8. Supresiones

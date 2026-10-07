@@ -1,0 +1,6 @@
+Hi {{firstName}},
+
+We received a request to reset your password. Open this link:
+{{resetUrl}}
+
+The link expires in {{expiresInMinutes}} minutes. If you did not ask for it, you can ignore this email.
