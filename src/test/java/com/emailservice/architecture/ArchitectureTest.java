@@ -26,6 +26,11 @@ class ArchitectureTest {
 	}
 
 	@Test
+	void templatesDoNotDependOnSending() {
+		ArchitectureRules.TEMPLATES_DO_NOT_KNOW_SENDING.check(PRODUCTION_CLASSES);
+	}
+
+	@Test
 	void providerSdkClassesAreOnlyUsedInsideProvider() {
 		ArchitectureRules.PROVIDER_SDK_ONLY_IN_PROVIDER.check(PRODUCTION_CLASSES);
 	}

@@ -1,4 +1,6 @@
-# Local toolchain for this project (ADR-0009: Java 25 LTS). Gradle's toolchain also requires 25;
+# Local toolchain for this project. Java 25 LTS (ADR-0009): Gradle's toolchain also requires it, and
 # this makes mise provide it here regardless of the global Java version.
 [tools]
 java = "temurin-25"
+# Used by scripts/publish-template.sh to build JSON from template files.
+jq = "1.8.2"

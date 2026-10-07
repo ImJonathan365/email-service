@@ -49,6 +49,13 @@ final class ArchitectureRules {
 		.resideInAnyPackage(PROVIDER_SDK_PACKAGES)
 		.because("provider SDKs stay behind EmailSender/WebhookVerifier (docs/05 §2)");
 
+	static final ArchRule TEMPLATES_DO_NOT_KNOW_SENDING = noClasses().that()
+		.resideInAPackage("com.emailservice.templates..")
+		.should()
+		.dependOnClassesThat()
+		.resideInAPackage("com.emailservice.sending..")
+		.because("templates receive text and variables and return rendered text (docs/05 §2)");
+
 	private ArchitectureRules() {
 	}
 

@@ -2,6 +2,35 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-06 (noche) — H3: plantillas
+
+- **Hecho:**
+  - **Motor Handlebars.java 4.5.5 endurecido** (ADR-0011):
+    - un escáner en lista blanca revisa cada `{{…}}` antes de compilar;
+    - un registro de helpers cerrado y un cargador que no carga nada;
+    - solo `MapValueResolver`;
+    - el render vuelve a escanear la fuente;
+    - escapado por contexto;
+    - `formatDate`, `formatNumber` y `formatMoney` con el locale y la zona horaria. Nashorn queda excluido.
+  - **Linter HTML con jsoup** (AC-04.7, AC-04.8), en modo XML para no perder etiquetas mal ubicadas.
+  - **Validador propio** del subconjunto de `variablesSchema` (`06` §3.3), sin dependencia de JSON Schema.
+  - **API `/v1/templates`:**
+    - crear, listar, detalle con contenido;
+    - borradores por locale (crear, editar, borrar);
+    - publicación inmutable que archiva la versión anterior del mismo locale;
+    - previsualización con la regla de URL de AC-07.8.
+    - Aislamiento por tenant en cada endpoint y publicación auditada.
+  - **Plantillas como código** (`05` §9): `templates/{tenant}/{templateKey}/`, `scripts/publish-template.sh`, `demo/password-reset` en `es-CR` y `en`, publicadas por `seed-local.sh`, y validadas en CI por `TemplatesAsCodeTest`.
+- **Decisiones del owner (2026-10-06):**
+  - `DELETE` de borradores;
+  - `locale` y la regla de URL en la previsualización;
+  - `previewVariables` en `template.json`;
+  - el script omite los locales sin cambios y el detalle incluye el contenido;
+  - `jq`, declarado en `mise.toml`.
+- **Ajuste de documentación:** el ejemplo de AC-37.5 en `en` es `CRC1,500.00` (salida congelada de la JDK 25).
+- **Pendiente de decisión del owner:** con AC-37.6 no se puede cambiar el conjunto `required` de una plantilla con varios locales publicados, porque se publica un locale cada vez y cada uno choca con el otro (reproducido). Opciones: publicar todos los locales en una sola operación, o aceptarlo y crear otra `key`.
+- **Fuera de H3** (dependen del envío, H4): fijar la versión en el mensaje, la caída al locale del tenant al enviar (AC-05.3/05.4, 37.2–37.4) y la prioridad (AC-36.2/36.3).
+
 ## 2026-10-06 (tarde) — H2: tenancy
 
 - **Hecho:**

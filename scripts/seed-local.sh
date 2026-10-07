@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Seeds a local stack (docker compose up) through the admin API: a demo tenant, a product key
-# (emails:send, emails:read) and an operator key (templates:write, suppressions:write, emails:read).
+# (emails:send, emails:read) and an operator key (templates:write, suppressions:write, emails:read),
+# then publishes every template under templates/{slug}/ with the operator key (needs jq).
 # Local use only. Keys are printed once and never written to disk; each run issues new keys.
 set -euo pipefail
 
@@ -60,4 +61,9 @@ Store these now; they are not shown again.
   Operator key (templates:write, suppressions:write, read):  $operator_key
 
 EOF
-# TODO(H3): create and publish a sample template once the template endpoints exist.
+
+for dir in templates/"$SLUG"/*/; do
+	[[ -f "$dir/template.json" ]] || continue
+	EMAIL_SERVICE_TEMPLATES_KEY="$operator_key" BASE_URL="$BASE_URL" \
+		./scripts/publish-template.sh "$SLUG" "$(basename "$dir")"
+done
