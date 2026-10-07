@@ -51,10 +51,22 @@ ArchUnit tests guard module and DataSource boundaries.
 Update `/docs` in the same PR when documented behaviour changes. If ambiguous: ask. If unattended:
 choose the most conservative option and leave `// TODO(owner-decision): …` listed in the PR.
 
+## Branching
+
+- `main`: always deployable. No new code is committed directly to `main`.
+- `dev`: integration branch.
+- One branch per milestone or large change, not per detail: `feat/h3-templates`, `feat/h4-sending`, ...
+  It starts from `dev` and is merged back into `dev` when build and tests are green.
+- `dev` goes to `main` only when the owner says so (milestone close or release).
+- Changes that do not affect the system (comments, docs, typos, AGENTS.md) may go directly to `dev` or `main`.
+- Push `dev` and `feat/*` so CI runs. Never push to `main`, never force push.
+
 ## Commands
 
 - Run everything: `cp .env.example .env && docker compose up --build` (app + PostgreSQL with roles + Mailpit at http://localhost:8025)
-- Migrations only: `APP_ROLE=migrate ./gradlew bootRun`
-- Tests: `./gradlew test`
+- Migrations only, from the host against the compose PostgreSQL (Spring does not read `.env` by itself):
+  `set -a; source .env; set +a; APP_ROLE=migrate ./gradlew bootRun`
+- Tests: `./gradlew test` (Docker required: Testcontainers)
+- RLS cost benchmark (ADR-0008/0019): `./gradlew benchmarkRls`
 - Seed local tenant + API keys + template: `./scripts/seed-local.sh`
 - End-to-end smoke test: `./scripts/smoke-test.sh`
