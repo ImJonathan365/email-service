@@ -38,11 +38,8 @@ final class TagScanner {
 				return findings;
 			}
 			int line = lineOf(source, open);
-			if (open > 0 && source.charAt(open - 1) == '\\') {
-				// An escaped \{{ is literal text for Handlebars.
-				from = open + 2;
-				continue;
-			}
+			// Escaped tags (\{{...}}) are checked too: backslash handling must never decide whether a
+			// tag is inspected, so an escaped tag only passes if it would also pass unescaped.
 			boolean longComment = source.startsWith("{{!--", open) || source.startsWith("{{~!--", open);
 			int close = source.indexOf(longComment ? "--}}" : "}}", open + 2);
 			if (close < 0) {

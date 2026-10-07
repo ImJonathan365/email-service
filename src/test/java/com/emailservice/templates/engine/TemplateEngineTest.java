@@ -43,7 +43,8 @@ class TemplateEngineTest {
 			"{{#> layout}}x{{/layout}}", "{{*inline \"x\"}}", "{{#*inline \"x\"}}y{{/inline}}", "{{=<% %>=}}",
 			"{{^items}}none{{/items}}", "{{lookup this \"x\"}}", "{{log name}}", "{{#custom name}}x{{/custom}}",
 			"{{#items}}x{{/items}}", "{{#each (items)}}x{{/each}}", "{{name key=value}}", "{{#each items as |i|}}x{{/each}}",
-			"{{embedded \"x\"}}", "{{precompile \"x\"}}", "{{formatDate}}", "{{[odd name]}}" })
+			"{{embedded \"x\"}}", "{{precompile \"x\"}}", "{{formatDate}}", "{{[odd name]}}", "\\{{{name}}}",
+			"\\\\{{{name}}}", "\\{{> footer}}" })
 	void ac_04_5_rejectsEveryConstructOutsideTheWhitelist(String template) {
 		assertThatThrownBy(() -> engine.check(html(template))).isInstanceOfSatisfying(ApiException.class, ex -> {
 			assertThat(ex.code()).isEqualTo(ErrorCode.UNSAFE_TEMPLATE_CONSTRUCT);
