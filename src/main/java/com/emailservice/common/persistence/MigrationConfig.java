@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import com.emailservice.common.config.AppProperties;
 
 @Configuration(proxyBeanMethods = false)
-class MigrationConfig {
+public class MigrationConfig {
 
 	private static final Logger log = LoggerFactory.getLogger(MigrationConfig.class);
 

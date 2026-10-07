@@ -5,9 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.sql.Connection;
 import java.sql.ResultSet;
 
+import javax.sql.DataSource;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.emailservice.common.config.AppRole;
 import com.emailservice.support.PostgresTestDatabase;
@@ -23,7 +26,9 @@ class MigrateRoleTests {
 					"--app.db.owner.username=" + Role.OWNER.username,
 					"--app.db.owner.password=" + Role.OWNER.password);
 
-		assertThat(context.getEnvironment().getActiveProfiles()).containsExactly(AppRole.MIGRATE_PROFILE);
+		// Only Flyway's own connection exists: no runtime DataSource, web layer or tenant code.
+		assertThat(context.getBeansOfType(DataSource.class)).isEmpty();
+		assertThat(context.getBeansOfType(JdbcClient.class)).isEmpty();
 		assertThat(SpringApplication.exit(context)).isZero();
 
 		try (Connection owner = PostgresTestDatabase.connect(Role.OWNER);

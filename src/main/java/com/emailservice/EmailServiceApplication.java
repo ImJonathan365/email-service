@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.core.env.StandardEnvironment;
 
 import com.emailservice.common.config.AppRole;
+import com.emailservice.common.persistence.MigrationApplication;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
@@ -23,12 +24,12 @@ public class EmailServiceApplication {
 	}
 
 	static SpringApplication create(AppRole role) {
-		SpringApplication application = new SpringApplication(EmailServiceApplication.class);
 		if (role == AppRole.MIGRATE) {
-			application.setWebApplicationType(WebApplicationType.NONE);
-			application.setAdditionalProfiles(AppRole.MIGRATE_PROFILE);
+			SpringApplication migration = new SpringApplication(MigrationApplication.class);
+			migration.setWebApplicationType(WebApplicationType.NONE);
+			return migration;
 		}
-		return application;
+		return new SpringApplication(EmailServiceApplication.class);
 	}
 
 }

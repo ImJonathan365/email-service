@@ -1,6 +1,0 @@
-# APP_ROLE=migrate: no web server and no runtime DataSource, so the readiness group's db
-# contributor does not exist; the job only runs Flyway and exits.
-management:
-  endpoint:
-    health:
-      validate-group-membership: false

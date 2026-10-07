@@ -5,13 +5,11 @@ import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.emailservice.common.config.AppProperties;
-import com.emailservice.common.config.AppRole;
 import com.emailservice.tenancy.TenantTransactionManager;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -21,7 +19,6 @@ import com.zaxxer.hikari.HikariDataSource;
  * email_system and is only reachable through the {@link SystemDataSource} qualifier.
  */
 @Configuration(proxyBeanMethods = false)
-@Profile("!" + AppRole.MIGRATE_PROFILE)
 public class DataSourceConfig {
 
 	private static final int TENANT_POOL_SIZE = 10;
