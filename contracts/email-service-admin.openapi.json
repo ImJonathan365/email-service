@@ -87,6 +87,97 @@
         "required" : [ "fromEmail", "fromName", "name", "slug" ],
         "type" : "object"
       },
+      "IssueRequest" : {
+        "properties" : {
+          "allowedCidrs" : {
+            "example" : [ "10.20.0.0/16" ],
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 20,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "expiresAt" : {
+            "example" : "2027-10-05T00:00:00Z",
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "name" : {
+            "example" : "production 2026",
+            "maxLength" : 100,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "scopes" : {
+            "example" : [ "emails:send", "emails:read" ],
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 4,
+            "minItems" : 1,
+            "type" : "array"
+          }
+        },
+        "required" : [ "name" ],
+        "type" : "object"
+      },
+      "Issued" : {
+        "properties" : {
+          "allowedCidrs" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "apiKey" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "keyPrefix" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "scopes" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "warning" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ListResponseListed" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Listed"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "ListResponseTenantView" : {
         "properties" : {
           "data" : {
@@ -96,6 +187,52 @@
             "type" : "array"
           },
           "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Listed" : {
+        "properties" : {
+          "allowedCidrs" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "keyPrefix" : {
+            "type" : "string"
+          },
+          "lastUsedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "revokedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "scopes" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "status" : {
             "type" : "string"
           }
         },
@@ -275,6 +412,30 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/admin/v1/api-keys/{id}" : {
+      "delete" : {
+        "operationId" : "revoke",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Revoke an API key (AC-03.4)",
+        "tags" : [ "Admin: API keys" ]
+      }
+    },
     "/admin/v1/tenants" : {
       "get" : {
         "operationId" : "list",
@@ -365,6 +526,74 @@
         } ],
         "summary" : "Update limits, hosts or status; suspend with status=SUSPENDED (FR-02)",
         "tags" : [ "Admin: tenants" ]
+      }
+    },
+    "/admin/v1/tenants/{slug}/api-keys" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "slug",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseListed"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "List a tenant's API keys, without secrets (AC-03.2)",
+        "tags" : [ "Admin: API keys" ]
+      },
+      "post" : {
+        "operationId" : "issue",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "slug",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/IssueRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Issued"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Issue an API key; the secret is returned only in this response (FR-03, FR-33)",
+        "tags" : [ "Admin: API keys" ]
       }
     }
   },
