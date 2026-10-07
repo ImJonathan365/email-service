@@ -54,3 +54,10 @@ app:
       password: ${DB_OWNER_PASSWORD:}
   http:
     trusted-proxies: ${TRUSTED_PROXIES:}
+  admin:
+    api-keys: ${ADMIN_API_KEYS:}
+  tenancy:
+    default-rate-limit-per-minute: ${DEFAULT_RATE_LIMIT_PER_MINUTE:60}
+    default-daily-quota: ${DEFAULT_DAILY_QUOTA:1000}
+    default-retention-days: ${DEFAULT_RETENTION_DAYS:90}
+    supported-locales: ${SUPPORTED_LOCALES:es-CR,en}

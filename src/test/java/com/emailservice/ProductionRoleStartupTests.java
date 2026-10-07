@@ -10,7 +10,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.emailservice.support.IntegrationTestDatabase;
+import com.emailservice.support.IntegrationTestEnvironment;
 import com.emailservice.support.PostgresTestDatabase;
 
 /** NFR-09: production api/worker instances start without owner credentials and never migrate. */
@@ -24,7 +24,7 @@ class ProductionRoleStartupTests {
 
 	@DynamicPropertySource
 	static void database(DynamicPropertyRegistry registry) {
-		IntegrationTestDatabase.register(registry);
+		IntegrationTestEnvironment.register(registry);
 		registry.add("app.db.owner.username", () -> "");
 		registry.add("app.db.owner.password", () -> "");
 	}

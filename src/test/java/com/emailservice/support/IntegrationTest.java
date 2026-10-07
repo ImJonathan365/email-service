@@ -20,7 +20,7 @@ public abstract class IntegrationTest {
 
 	@DynamicPropertySource
 	static void database(DynamicPropertyRegistry registry) {
-		IntegrationTestDatabase.register(registry);
+		IntegrationTestEnvironment.register(registry);
 	}
 
 	protected TestHttp http() {

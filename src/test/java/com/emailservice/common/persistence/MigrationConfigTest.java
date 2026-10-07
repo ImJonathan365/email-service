@@ -4,6 +4,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.util.List;
+
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.flyway.autoconfigure.FlywayMigrationStrategy;
@@ -44,7 +46,7 @@ class MigrationConfigTest {
 	}
 
 	private static FlywayMigrationStrategy strategyFor(AppEnv env, AppRole role) {
-		return new MigrationConfig().flywayMigrationStrategy(new AppProperties(env, role, DB, null));
+		return new MigrationConfig().flywayMigrationStrategy(new AppProperties(env, role, DB, null, new AppProperties.Admin(List.of("admin-secret-0123456789abcdef0123456789")), null));
 	}
 
 }

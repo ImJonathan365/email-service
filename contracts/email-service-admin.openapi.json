@@ -1,0 +1,374 @@
+{
+  "components" : {
+    "schemas" : {
+      "Create" : {
+        "properties" : {
+          "allowedFromDomains" : {
+            "example" : [ "colmena.cr" ],
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 20,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "allowedLinkHosts" : {
+            "example" : [ "colmena.cr", "app.colmena.cr" ],
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 50,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "dailyQuota" : {
+            "exclusiveMinimum" : 0,
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "fromEmail" : {
+            "example" : "no-reply@colmena.cr",
+            "format" : "email",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "fromName" : {
+            "example" : "Colmena",
+            "maxLength" : 80,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "locale" : {
+            "example" : "es-CR",
+            "type" : "string"
+          },
+          "name" : {
+            "example" : "Colmena",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "rateLimitPerMinute" : {
+            "exclusiveMinimum" : 0,
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "replyTo" : {
+            "format" : "email",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "retentionDays" : {
+            "format" : "int32",
+            "maximum" : 400,
+            "minimum" : 7,
+            "type" : "integer"
+          },
+          "slug" : {
+            "example" : "colmena",
+            "minLength" : 1,
+            "pattern" : "[a-z0-9-]{2,40}",
+            "type" : "string"
+          },
+          "storeRenderedContent" : {
+            "type" : "boolean"
+          },
+          "timezone" : {
+            "example" : "America/Costa_Rica",
+            "type" : "string"
+          }
+        },
+        "required" : [ "fromEmail", "fromName", "name", "slug" ],
+        "type" : "object"
+      },
+      "ListResponseTenantView" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TenantView"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "TenantView" : {
+        "properties" : {
+          "allowedFromDomains" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "allowedLinkHosts" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "dailyQuota" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "fromEmail" : {
+            "type" : "string"
+          },
+          "fromName" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "pauseReason" : {
+            "type" : "string"
+          },
+          "rateLimitPerMinute" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "replyTo" : {
+            "type" : "string"
+          },
+          "retentionDays" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sendingPausedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "storeRenderedContent" : {
+            "type" : "boolean"
+          },
+          "timezone" : {
+            "type" : "string"
+          },
+          "updatedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "Update" : {
+        "properties" : {
+          "allowedFromDomains" : {
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 20,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "allowedLinkHosts" : {
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 50,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "dailyQuota" : {
+            "exclusiveMinimum" : 0,
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "fromEmail" : {
+            "format" : "email",
+            "maxLength" : 254,
+            "minLength" : 3,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "fromName" : {
+            "maxLength" : 80,
+            "minLength" : 1,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "name" : {
+            "maxLength" : 200,
+            "minLength" : 1,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "rateLimitPerMinute" : {
+            "exclusiveMinimum" : 0,
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "replyTo" : {
+            "format" : "email",
+            "maxLength" : 254,
+            "minLength" : 3,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          },
+          "retentionDays" : {
+            "format" : "int32",
+            "maximum" : 400,
+            "minimum" : 7,
+            "type" : "integer"
+          },
+          "status" : {
+            "enum" : [ "ACTIVE", "SUSPENDED" ],
+            "pattern" : "ACTIVE|SUSPENDED",
+            "type" : "string"
+          },
+          "storeRenderedContent" : {
+            "type" : "boolean"
+          },
+          "timezone" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      }
+    },
+    "securitySchemes" : {
+      "adminKey" : {
+        "description" : "One of ADMIN_API_KEYS; private network only",
+        "in" : "header",
+        "name" : "X-Admin-Key",
+        "type" : "apiKey"
+      },
+      "apiKey" : {
+        "description" : "Tenant API key: esk_{env}_{prefix}_{secret}",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  },
+  "info" : {
+    "description" : "Internal transactional email service. See docs/07-api-interna.md.",
+    "title" : "email-service",
+    "version" : "v1"
+  },
+  "openapi" : "3.1.0",
+  "paths" : {
+    "/admin/v1/tenants" : {
+      "get" : {
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseTenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "List tenants (FR-02)",
+        "tags" : [ "Admin: tenants" ]
+      },
+      "post" : {
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Create"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Create a tenant (FR-02)",
+        "tags" : [ "Admin: tenants" ]
+      }
+    },
+    "/admin/v1/tenants/{slug}" : {
+      "patch" : {
+        "operationId" : "update",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "slug",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Update"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Update limits, hosts or status; suspend with status=SUSPENDED (FR-02)",
+        "tags" : [ "Admin: tenants" ]
+      }
+    }
+  },
+  "servers" : [ {
+    "url" : "/"
+  } ]
+}

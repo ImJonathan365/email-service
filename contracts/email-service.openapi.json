@@ -1,5 +1,19 @@
 {
-  "components" : { },
+  "components" : {
+    "securitySchemes" : {
+      "adminKey" : {
+        "description" : "One of ADMIN_API_KEYS; private network only",
+        "in" : "header",
+        "name" : "X-Admin-Key",
+        "type" : "apiKey"
+      },
+      "apiKey" : {
+        "description" : "Tenant API key: esk_{env}_{prefix}_{secret}",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  },
   "info" : {
     "description" : "Internal transactional email service. See docs/07-api-interna.md.",
     "title" : "email-service",

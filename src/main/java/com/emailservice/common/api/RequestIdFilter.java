@@ -10,12 +10,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.slf4j.MDC;
+import org.springframework.core.Ordered;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /** Accepts or assigns X-Request-Id, echoes it on every response and puts it in the log context. */
 public class RequestIdFilter extends OncePerRequestFilter {
 
 	public static final String HEADER = "X-Request-Id";
+
+	/** Runs first; authentication filters are ordered after it so their errors carry the id. */
+	public static final int ORDER = Ordered.HIGHEST_PRECEDENCE;
 
 	private static final String ATTRIBUTE = RequestIdFilter.class.getName();
 

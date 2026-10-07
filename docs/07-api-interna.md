@@ -3,7 +3,7 @@
 > Revisión 2026-10-05. Los cambios respecto a la versión del 2026-09-20 y su impacto en los productos están en §12 (notas de migración). Como aún no hay ninguna versión desplegada en producción, se aplican sobre `/v1` (NFR-18).
 
 Base URL: `https://email.internal.midominio.com` (local: `http://localhost:8080`).
-Swagger UI: `/swagger-ui.html` · OpenAPI: `/v3/api-docs` · Spec versionada: `contracts/email-service.openapi.json`.
+Swagger UI: `/swagger-ui.html` · OpenAPI: `/v3/api-docs/public` y `/v3/api-docs/admin` · Specs versionadas: `contracts/email-service.openapi.json` (productos) y `contracts/email-service-admin.openapi.json` (administración, AC-25.3).
 
 ## 1. Convenciones
 
