@@ -101,6 +101,31 @@ class TemplateRepository {
 			.optional();
 	}
 
+	/** The calling tenant's own row: RLS only lets email_app read that one. */
+	TenantSettings tenantSettings(UUID tenantId) {
+		return jdbc.sql("SELECT locale, timezone, allowed_link_hosts FROM tenant WHERE id = :tenantId")
+			.param("tenantId", tenantId)
+			.query((rs, row) -> new TenantSettings(rs.getString("locale"), rs.getString("timezone"),
+					List.of((String[]) rs.getArray("allowed_link_hosts").getArray())))
+			.single();
+	}
+
+	record TenantSettings(String locale, String timezone, List<String> allowedLinkHosts) {
+	}
+
+	/** The published version of a template in one locale, if any. */
+	Optional<TemplateViews.StoredVersion> publishedVersion(UUID tenantId, UUID templateId, String locale) {
+		return jdbc.sql("SELECT " + VERSION_COLUMNS + """
+				 FROM template_version
+				WHERE tenant_id = :tenantId AND template_id = :templateId AND locale = :locale AND status = 'PUBLISHED'
+				""")
+			.param("tenantId", tenantId)
+			.param("templateId", templateId)
+			.param("locale", locale)
+			.query(TemplateRepository::version)
+			.optional();
+	}
+
 	/** Published versions of all the tenant's templates, for the list view. */
 	List<PublishedRow> publishedVersions(UUID tenantId) {
 		return jdbc.sql("""

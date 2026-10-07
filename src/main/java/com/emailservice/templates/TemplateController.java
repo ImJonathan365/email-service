@@ -37,10 +37,13 @@ class TemplateController {
 
 	private final TemplateService service;
 
+	private final TemplatePreviewService previews;
+
 	private final ClientIpResolver clientIpResolver;
 
-	TemplateController(TemplateService service, ClientIpResolver clientIpResolver) {
+	TemplateController(TemplateService service, TemplatePreviewService previews, ClientIpResolver clientIpResolver) {
 		this.service = service;
+		this.previews = previews;
 		this.clientIpResolver = clientIpResolver;
 	}
 
@@ -100,6 +103,14 @@ class TemplateController {
 		Actor actor = new Actor(Actor.Type.API_KEY, apiKey.keyId().toString(),
 				clientIpResolver.resolve(request).getHostAddress(), RequestIdFilter.current(request));
 		return service.publish(apiKey.tenantId(), key, version, actor);
+	}
+
+	@PostMapping("/{key}/preview")
+	@RequiresScope(Scope.TEMPLATES_WRITE)
+	@Operation(summary = "Render a version with sample variables without sending anything (FR-06)")
+	TemplateViews.Preview preview(@PathVariable String key, @RequestBody TemplateViews.PreviewRequest body,
+			HttpServletRequest request) {
+		return previews.preview(tenant(request), key, body);
 	}
 
 	private static UUID tenant(HttpServletRequest request) {

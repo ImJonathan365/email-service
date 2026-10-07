@@ -47,6 +47,52 @@
         },
         "type" : "object"
       },
+      "Preview" : {
+        "properties" : {
+          "html" : {
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "subject" : {
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "text" : {
+            "type" : "string"
+          },
+          "warnings" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "PreviewRequest" : {
+        "properties" : {
+          "locale" : {
+            "example" : "es-CR",
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "variables" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "PublishedVersion" : {
         "properties" : {
           "locale" : {
@@ -364,6 +410,46 @@
           "apiKey" : [ ]
         } ],
         "summary" : "Template detail with every version and its content (FR-04)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/preview" : {
+      "post" : {
+        "operationId" : "preview",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Preview"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Render a version with sample variables without sending anything (FR-06)",
         "tags" : [ "Templates" ]
       }
     },

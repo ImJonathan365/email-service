@@ -66,6 +66,15 @@ public final class TemplateViews {
 	public record VersionPublished(int version, String locale, String status, Instant publishedAt) {
 	}
 
+	/** FR-06: without templateVersion, the published version of locale (or the tenant's locale). */
+	public record PreviewRequest(Integer templateVersion, @Schema(example = "es-CR") String locale,
+			@Schema(type = "object") JsonNode variables) {
+	}
+
+	public record Preview(int templateVersion, String locale, String status, String subject, String html,
+			String text, List<String> warnings) {
+	}
+
 	/** Internal: a version row with its ids, for the service. */
 	record StoredVersion(UUID id, UUID templateId, int version, String locale, String status, String subjectTemplate,
 			String htmlTemplate, String textTemplate, String variablesSchema, Instant createdAt, Instant publishedAt) {
