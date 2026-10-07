@@ -16,7 +16,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.emailservice.audit.Actor;
 import com.emailservice.common.api.ListResponse;
+import com.emailservice.common.api.RequestIdFilter;
+import com.emailservice.common.web.ClientIpResolver;
 import com.emailservice.tenancy.AuthenticatedApiKey;
 import com.emailservice.tenancy.RequiresScope;
 import com.emailservice.tenancy.Scope;
@@ -34,8 +37,11 @@ class TemplateController {
 
 	private final TemplateService service;
 
-	TemplateController(TemplateService service) {
+	private final ClientIpResolver clientIpResolver;
+
+	TemplateController(TemplateService service, ClientIpResolver clientIpResolver) {
 		this.service = service;
+		this.clientIpResolver = clientIpResolver;
 	}
 
 	@PostMapping
@@ -83,6 +89,17 @@ class TemplateController {
 	@Operation(summary = "Delete a draft version (AC-04.3)")
 	void deleteVersion(@PathVariable String key, @PathVariable int version, HttpServletRequest request) {
 		service.deleteDraft(tenant(request), key, version);
+	}
+
+	@PostMapping("/{key}/versions/{version}/publish")
+	@RequiresScope(Scope.TEMPLATES_WRITE)
+	@Operation(summary = "Publish a draft; it becomes immutable and archives the previous one of its locale (FR-05)")
+	TemplateViews.VersionPublished publish(@PathVariable String key, @PathVariable int version,
+			HttpServletRequest request) {
+		AuthenticatedApiKey apiKey = AuthenticatedApiKey.from(request);
+		Actor actor = new Actor(Actor.Type.API_KEY, apiKey.keyId().toString(),
+				clientIpResolver.resolve(request).getHostAddress(), RequestIdFilter.current(request));
+		return service.publish(apiKey.tenantId(), key, version, actor);
 	}
 
 	private static UUID tenant(HttpServletRequest request) {

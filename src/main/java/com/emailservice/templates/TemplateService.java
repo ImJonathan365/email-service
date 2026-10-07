@@ -4,12 +4,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.emailservice.audit.Actor;
+import com.emailservice.audit.AuditAction;
+import com.emailservice.audit.AuditLog;
 import com.emailservice.common.api.ApiException;
 import com.emailservice.common.api.ErrorCode;
 import com.emailservice.common.api.Problem.FieldError;
@@ -40,9 +45,12 @@ class TemplateService {
 
 	private final List<String> supportedLocales;
 
+	private final AuditLog auditLog;
+
 	TemplateService(TemplateRepository templates, TemplateEngine engine, JsonMapper jsonMapper,
-			AppProperties properties) {
+			AppProperties properties, AuditLog auditLog) {
 		this.templates = templates;
+		this.auditLog = auditLog;
 		this.engine = engine;
 		this.jsonMapper = jsonMapper;
 		this.supportedLocales = properties.tenancy().supportedLocales();
@@ -112,6 +120,45 @@ class TemplateService {
 	@Transactional
 	void deleteDraft(UUID tenantId, String key, int version) {
 		templates.deleteDraft(tenantId, draft(tenantId, key, version).id());
+	}
+
+	/**
+	 * Publishes a draft (FR-05): schema required (AC-05.5), URL variables declared as uri
+	 * (AC-04.8), the same required variables as the other published locales (AC-37.6). The
+	 * previous published version of the same locale is archived (AC-05.2, AC-37.1). Audited.
+	 */
+	@Transactional
+	TemplateViews.VersionPublished publish(UUID tenantId, String key, int version, Actor actor) {
+		TemplateViews.StoredVersion draft = draft(tenantId, key, version);
+		if (draft.variablesSchema() == null) {
+			throw ApiException.validation(List.of(new FieldError("variablesSchema", "is required to publish")));
+		}
+		VariablesSchema schema = VariablesSchema.parse(schemaNode(draft.variablesSchema()), "variablesSchema");
+		List<FieldError> urlErrors = HtmlLinter.checkUrlVariables(draft.htmlTemplate(), schema);
+		if (!urlErrors.isEmpty()) {
+			throw new ApiException(ErrorCode.UNSAFE_TEMPLATE_CONSTRUCT,
+					"Variables in URL attributes must be declared with format uri.", urlErrors);
+		}
+		for (TemplateViews.StoredVersion other : templates.versions(tenantId, draft.templateId())) {
+			if ("PUBLISHED".equals(other.status()) && !other.locale().equals(draft.locale())) {
+				Set<String> otherRequired = VariablesSchema
+					.parse(schemaNode(other.variablesSchema()), "variablesSchema")
+					.requiredVariables();
+				if (!otherRequired.equals(schema.requiredVariables())) {
+					throw ApiException.validation(List.of(new FieldError("variablesSchema.required",
+							"must match the published " + other.locale() + " version (version " + other.version()
+									+ "): " + new TreeSet<>(otherRequired))));
+				}
+			}
+		}
+
+		templates.archivePublished(tenantId, draft.templateId(), draft.locale());
+		TemplateViews.StoredVersion published = templates.publish(tenantId, draft.id());
+		auditLog.record(templates.jdbc(), actor, AuditAction.TEMPLATE_PUBLISHED, tenantId, "template_version",
+				published.id().toString(),
+				Map.of("templateKey", key, "version", published.version(), "locale", published.locale()));
+		return new TemplateViews.VersionPublished(published.version(), published.locale(), published.status(),
+				published.publishedAt());
 	}
 
 	/** A version that can still change; published and archived ones are immutable (AC-05.1). */

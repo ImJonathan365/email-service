@@ -63,6 +63,9 @@ public final class TemplateViews {
 	public record VersionCreated(int version, String locale, String status, Instant createdAt) {
 	}
 
+	public record VersionPublished(int version, String locale, String status, Instant publishedAt) {
+	}
+
 	/** Internal: a version row with its ids, for the service. */
 	record StoredVersion(UUID id, UUID templateId, int version, String locale, String status, String subjectTemplate,
 			String htmlTemplate, String textTemplate, String variablesSchema, Instant createdAt, Instant publishedAt) {

@@ -243,6 +243,25 @@
           }
         },
         "type" : "object"
+      },
+      "VersionPublished" : {
+        "properties" : {
+          "locale" : {
+            "type" : "string"
+          },
+          "publishedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
       }
     },
     "securitySchemes" : {
@@ -462,6 +481,44 @@
           "apiKey" : [ ]
         } ],
         "summary" : "Replace a draft version; published versions are immutable (AC-04.3)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/versions/{version}/publish" : {
+      "post" : {
+        "operationId" : "publish",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "version",
+          "required" : true,
+          "schema" : {
+            "format" : "int32",
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VersionPublished"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Publish a draft; it becomes immutable and archives the previous one of its locale (FR-05)",
         "tags" : [ "Templates" ]
       }
     }
