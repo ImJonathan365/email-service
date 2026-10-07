@@ -1,12 +1,15 @@
 package com.emailservice.common.api;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
@@ -59,16 +62,31 @@ class ApiExceptionHandler {
 		return problems.entity(request, ErrorCode.VALIDATION_ERROR, "One or more fields are invalid.", errors);
 	}
 
-	@ExceptionHandler({ HttpMessageNotReadableException.class, HttpMediaTypeNotSupportedException.class })
-	ResponseEntity<Problem> malformed(Exception ex, HttpServletRequest request) {
+	@ExceptionHandler(HttpMessageNotReadableException.class)
+	ResponseEntity<Problem> malformed(HttpMessageNotReadableException ex, HttpServletRequest request) {
 		return problems.entity(request, ErrorCode.MALFORMED_REQUEST, "The request body could not be read as JSON.",
 				List.of());
 	}
 
-	// TODO(owner-decision): the closed catalog has no code for 405, so an unsupported method on an
-	// existing path is reported as RESOURCE_NOT_FOUND; a METHOD_NOT_ALLOWED code would change the contract.
-	@ExceptionHandler({ NoResourceFoundException.class, HttpRequestMethodNotSupportedException.class,
-			MethodArgumentTypeMismatchException.class })
+	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+	ResponseEntity<Problem> unsupportedMediaType(HttpMediaTypeNotSupportedException ex, HttpServletRequest request) {
+		return problems.entity(request, ErrorCode.UNSUPPORTED_MEDIA_TYPE, "The request body must be application/json.",
+				List.of());
+	}
+
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	ResponseEntity<Problem> methodNotAllowed(HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
+		Set<HttpMethod> supported = ex.getSupportedHttpMethods();
+		String allow = supported == null ? ""
+				: supported.stream().map(HttpMethod::name).sorted().collect(Collectors.joining(", "));
+		return ResponseEntity.status(ErrorCode.METHOD_NOT_ALLOWED.status())
+			.header("Content-Type", Problem.MEDIA_TYPE)
+			.header("Allow", allow)
+			.body(problems.problem(request, ErrorCode.METHOD_NOT_ALLOWED,
+					"Method " + ex.getMethod() + " is not supported on this resource.", List.of()));
+	}
+
+	@ExceptionHandler({ NoResourceFoundException.class, MethodArgumentTypeMismatchException.class })
 	ResponseEntity<Problem> notFound(Exception ex, HttpServletRequest request) {
 		return problems.entity(request, ErrorCode.RESOURCE_NOT_FOUND, "The requested resource does not exist.",
 				List.of());
