@@ -28,6 +28,9 @@ import com.emailservice.support.PostgresTestDatabase;
 import com.emailservice.support.PostgresTestDatabase.Role;
 import com.emailservice.tenancy.RequiresScope;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /** FR-01 (API key authentication) and FR-33 (scopes and source CIDRs) on /v1. */
 @ExtendWith(OutputCaptureExtension.class)
 class ApiKeyAuthenticationTest extends IntegrationTest {
@@ -41,6 +44,9 @@ class ApiKeyAuthenticationTest extends IntegrationTest {
 	@Autowired
 	@Qualifier("requestMappingHandlerMapping")
 	RequestMappingHandlerMapping handlerMapping;
+
+	@Autowired
+	MeterRegistry meterRegistry;
 
 	@BeforeEach
 	void setUp() throws Exception {
@@ -83,6 +89,30 @@ class ApiKeyAuthenticationTest extends IntegrationTest {
 			bodies.add(response.body().replaceAll("\"requestId\":\"[^\"]+\"", ""));
 		}
 		assertThat(bodies).allMatch(body -> body.equals(bodies.getFirst()));
+	}
+
+	@Test
+	void unknownKeysAreCountedAsAMetricNotAudited() throws Exception {
+		double missing = unauthenticated("missing");
+		double malformed = unauthenticated("malformed");
+		double unknown = unauthenticated("unknown_key");
+
+		String requestId = "test-" + UUID.randomUUID();
+		http().get(READ).header("X-Request-Id", requestId).send();
+		read("Bearer nope");
+		read("Bearer esk_test_ZZZZZZZZ_" + "a".repeat(43));
+
+		assertThat(unauthenticated("missing")).isEqualTo(missing + 1);
+		assertThat(unauthenticated("malformed")).isEqualTo(malformed + 1);
+		assertThat(unauthenticated("unknown_key")).isEqualTo(unknown + 1);
+		assertThat(AuditRows.forRequest(requestId)).isEmpty();
+		assertThat(http().get("/actuator/prometheus").send().body())
+			.contains("email_auth_unauthenticated_total{reason=\"unknown_key\"}");
+	}
+
+	private double unauthenticated(String reason) {
+		Counter counter = meterRegistry.find("email.auth.unauthenticated").tag("reason", reason).counter();
+		return counter == null ? 0 : counter.count();
 	}
 
 	@Test

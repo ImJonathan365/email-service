@@ -22,6 +22,8 @@ import com.emailservice.tenancy.ApiKeyFormat;
 import com.emailservice.tenancy.AuthenticatedApiKey;
 import com.emailservice.tenancy.Scope;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Resolves the Authorization header to a tenant (FR-01, FR-33). Every failure on an unknown or
  * malformed key returns the same 401, so a response never tells whether a key exists (AC-01.2).
@@ -37,20 +39,26 @@ class ApiKeyAuthenticator {
 
 	private final AuditLog auditLog;
 
-	ApiKeyAuthenticator(ApiKeyLookup lookup, AuditLog auditLog) {
+	private final MeterRegistry meterRegistry;
+
+	ApiKeyAuthenticator(ApiKeyLookup lookup, AuditLog auditLog, MeterRegistry meterRegistry) {
 		this.lookup = lookup;
 		this.auditLog = auditLog;
+		this.meterRegistry = meterRegistry;
 	}
 
 	AuthenticatedApiKey authenticate(String authorization, InetAddress clientIp, String requestId) {
+		if (authorization == null) {
+			throw unknown("missing");
+		}
 		ApiKeyFormat.Parsed presented = bearerToken(authorization).flatMap(ApiKeyFormat::parse)
-			.orElseThrow(ApiKeyAuthenticator::unauthenticated);
+			.orElseThrow(() -> unknown("malformed"));
 		ApiKeyLookup.KeyRow key = lookup.findByPrefix(presented.keyPrefix())
 			.filter(row -> MessageDigest.isEqual(row.keyHash(), ApiKeyFormat.hash(presented.secret())))
-			// TODO(owner-decision): failures on unknown keys are not audited one by one (that would let
-			// anyone flood audit_log); docs/08 §4/§7 ask for per-IP aggregation and a 401 rate limit,
-			// planned with the rest of rate limiting in H7.
-			.orElseThrow(ApiKeyAuthenticator::unauthenticated);
+			// TODO(owner-decision): failures on unknown keys are only counted, not audited one by one
+			// (that would let anyone flood audit_log); per-IP aggregation and the 401 rate limit of
+			// docs/08 §4/§7 come with the rest of rate limiting in H7.
+			.orElseThrow(() -> unknown("unknown_key"));
 
 		Actor actor = new Actor(Actor.Type.API_KEY, key.id().toString(), clientIp.getHostAddress(), requestId);
 		if (key.revoked()) {
@@ -90,6 +98,12 @@ class ApiKeyAuthenticator {
 
 	private static Set<Scope> scopes(List<String> values) {
 		return values.stream().map(Scope::fromValue).flatMap(Optional::stream).collect(Collectors.toSet());
+	}
+
+	/** A 401 that names no known key: counted as a metric only (email_auth_unauthenticated_total). */
+	private ApiException unknown(String reason) {
+		meterRegistry.counter("email.auth.unauthenticated", "reason", reason).increment();
+		return unauthenticated();
 	}
 
 	private static ApiException unauthenticated() {

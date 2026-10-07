@@ -308,7 +308,7 @@ svix-signature: v1,k8s9…
 - `PATCH /admin/v1/tenants/{slug}` es una actualización parcial: un campo ausente o `null` conserva su valor (por eso `replyTo` no se puede vaciar con un `PATCH`). Las listas (`allowedFromDomains`, `allowedLinkHosts`) se sustituyen completas y se normalizan a minúsculas. `status` admite `ACTIVE` o `SUSPENDED`.
 - `GET /admin/v1/tenants` y `GET /admin/v1/tenants/{slug}/api-keys` responden `{"data": [...], "nextCursor": null}`.
 - Todo acceso a `/admin/v1/**` queda en auditoría: las modificaciones con su acción (`TENANT_CREATED`, `TENANT_UPDATED` con los nombres de los campos cambiados, `TENANT_SUSPENDED`, `TENANT_REACTIVATED`, `API_KEY_ISSUED`, `API_KEY_REVOKED`), las lecturas como `ADMIN_ACCESS` y los rechazos como `ADMIN_ACCESS_DENIED`.
-- Una ruta que existe con otro método responde `404 RESOURCE_NOT_FOUND`, porque el catálogo cerrado no tiene código para `405` (pendiente de decisión del owner).
+- Una ruta que existe con otro método responde `405 METHOD_NOT_ALLOWED` con la cabecera `Allow`; un cuerpo que no es JSON, `415 UNSUPPORTED_MEDIA_TYPE` (añadidos al catálogo el 2026-10-06; compatibles según NFR-17).
 
 **Levantar pausa** — `POST /admin/v1/tenants/colmena/resume-sending` `{ "note": "pico legítimo: aviso de mantenimiento" }` → `200`.
 
@@ -342,11 +342,13 @@ svix-signature: v1,k8s9…
 | 403 | `FROM_DOMAIN_NOT_ALLOWED` | Remitente fuera de `allowedFromDomains` |
 | 403 | `RECIPIENT_NOT_ALLOWED_IN_ENV` | Destino fuera de la allowlist de entorno |
 | 404 | `TEMPLATE_NOT_FOUND` / `MESSAGE_NOT_FOUND` / `RESOURCE_NOT_FOUND` | No existe (o es de otro tenant) |
+| 405 | `METHOD_NOT_ALLOWED` | **(rev. 2026-10-06)** El recurso existe pero no admite ese método (incluye la cabecera `Allow`) |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | Misma clave, cuerpo distinto |
 | 409 | `TEMPLATE_KEY_TAKEN` / `TENANT_SLUG_TAKEN` | Identificador en uso |
 | 409 | `VERSION_IMMUTABLE` | Edición de versión publicada |
 | 409 | `MESSAGE_NOT_CANCELABLE` | El mensaje ya no está en cola |
 | 413 | `PAYLOAD_TOO_LARGE` | Supera `MAX_REQUEST_BYTES` (o el límite de lote) |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | **(rev. 2026-10-06)** El cuerpo no es `application/json` |
 | 422 | `VALIDATION_ERROR` | Campos inválidos (incluye `errors[]` por campo) |
 | 422 | `INVALID_EMAIL_ADDRESS` | Dirección mal formada |
 | 422 | `HEADER_INJECTION_DETECTED` | CR/LF en un campo de cabecera |
@@ -393,7 +395,7 @@ Reglas para el cliente:
 | Cambio | Impacto en el cliente | Compatibilidad |
 |---|---|---|
 | Claves de idempotencia recomendadas: de `signup-{userId}-{fecha}` a id de evento | Cambiar cómo se deriva la clave | Sin cambio de formato |
-| Códigos nuevos (`INSUFFICIENT_SCOPE`, `IP_NOT_ALLOWED`, `TENANT_SENDING_PAUSED`, `UNSAFE_URL`, `ATTACHMENT_INVALID`, `SEND_AT_OUT_OF_RANGE`) | Tratar según su clase HTTP | Compatible si se cumple §1 |
+| Códigos nuevos (`INSUFFICIENT_SCOPE`, `IP_NOT_ALLOWED`, `TENANT_SENDING_PAUSED`, `UNSAFE_URL`, `ATTACHMENT_INVALID`, `SEND_AT_OUT_OF_RANGE`; **(rev. 2026-10-06)** `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`) | Tratar según su clase HTTP | Compatible si se cumple §1 |
 | `droppedRecipients`, `locale` y `suppressionReason` en la respuesta | Ignorar o usar | Compatible (campos nuevos) |
 | Campos opcionales `locale`, `fromName`, `sendAt` en la petición | Usarlos si se necesitan | Compatible |
 | Variables URL validadas contra `allowedLinkHosts` | Dar de alta los hosts del producto en el tenant | **Incompatible** si el producto envía enlaces a hosts no registrados → configurar antes de la integración |

@@ -137,7 +137,7 @@ Endpoints `/admin/v1/**` protegidos por una credencial de administrador distinta
 - **AC-03.1** — **(rev. 2026-10)** *Cuando* se emite una key para un tenant, *entonces* la respuesta `201` incluye el secreto **una sola vez**, con formato `esk_{env}_{prefix}_{secret}`: `prefix` de 8 caracteres Base62 (se regenera si colisiona) y `secret` de 43 caracteres Base62 (≥ 256 bits de un CSPRNG). En base de datos solo quedan el prefijo y el hash.
 - **AC-03.2** — *Dado* un tenant, *cuando* se consultan sus keys, *entonces* se listan `prefix`, `name`, `status`, `scopes`, `allowedCidrs`, `createdAt`, `expiresAt` y `lastUsedAt`, nunca el secreto.
 - **AC-03.3** — Un tenant puede tener **varias keys activas** simultáneamente (rotación con solapamiento).
-- **AC-03.4** — *Cuando* se revoca una key, *entonces* deja de autenticar en la siguiente petición (≤ 60 s si hay caché) y queda `REVOKED` con `revoked_at`.
+- **AC-03.4** — **(rev. 2026-10-06, ADR-0019)** *Cuando* se revoca una key, *entonces* deja de autenticar en la siguiente petición (no hay caché de keys) y queda `REVOKED` con `revoked_at`.
 - **AC-03.5** — Una key con `expiresAt` en el pasado no autentica.
 - **AC-03.6** — Emitir, revocar y rotar quedan registrados en auditoría (FR-22) con el actor administrador.
 - **AC-03.7** — **(rev. 2026-10)** Los ámbitos y CIDR de una key se fijan al emitirla y no se modifican; para cambiarlos se emite otra (FR-33).
@@ -338,7 +338,7 @@ Requiere el ámbito `templates:write` (FR-33).
 ### FR-25 — Documentación OpenAPI (Must)
 
 - **AC-25.1** — Swagger UI disponible en `/swagger-ui.html` y la spec en `/v3/api-docs`, con ejemplos de petición y respuesta por endpoint.
-- **AC-25.2** — La spec se exporta a `contracts/email-service.openapi.json` y un test de CI falla si difiere de la generada.
+- **AC-25.2** — **(rev. 2026-10-06)** La spec se exporta por grupo a `contracts/email-service.openapi.json` (API de productos: `/v1/**` y `/webhooks/**`) y a `contracts/email-service-admin.openapi.json` (`/admin/v1/**`, AC-25.3); un test de CI falla si alguno difiere de la generada.
 - **AC-25.3** — Los endpoints `/admin/v1/**` aparecen en un grupo separado.
 
 ### FR-26 — Cancelación de un mensaje encolado (Could)
