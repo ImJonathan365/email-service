@@ -1,0 +1,24 @@
+{
+  "key": "password-reset",
+  "name": "Password reset",
+  "description": "Link to reset the account password; expires after a few minutes.",
+  "category": "SECURITY",
+  "trackingEnabled": false,
+  "subject": {
+    "es-CR": "{{firstName}}, restablece tu contraseña",
+    "en": "{{firstName}}, reset your password"
+  },
+  "variablesSchema": {
+    "required": ["firstName", "resetUrl", "expiresInMinutes"],
+    "properties": {
+      "firstName": { "type": "string", "maxLength": 80 },
+      "resetUrl": { "type": "string", "format": "uri", "x-sensitive": true },
+      "expiresInMinutes": { "type": "integer" }
+    }
+  },
+  "previewVariables": {
+    "firstName": "Ana",
+    "resetUrl": "https://demo.localhost/reset?token=preview-only",
+    "expiresInMinutes": 30
+  }
+}
