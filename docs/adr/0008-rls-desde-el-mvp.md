@@ -1,6 +1,6 @@
 # ADR-0008 — Row Level Security desde el MVP y claves foráneas compuestas por tenant
 
-- **Estado:** Accepted (owner, 2026-10-05)
+- **Estado:** Accepted (owner, 2026-10-05); criterio de revisión de coste aclarado por ADR-0019 (se mide sobre la transacción completa)
 - **Fecha:** 2026-10-05
 - **Autor:** agente: Claude (auditoría de documentación)
 - **Supersede:** ADR-0007

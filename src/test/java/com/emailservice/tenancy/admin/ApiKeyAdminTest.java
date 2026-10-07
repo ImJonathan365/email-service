@@ -153,7 +153,9 @@ class ApiKeyAdminTest extends IntegrationTest {
 		HttpResponse<String> response = admin(http().patch("/admin/v1/api-keys/" + id))
 			.json("{\"scopes\": [\"templates:write\"]}")
 			.send();
-		assertThat(response.statusCode()).isEqualTo(404);
+		assertThat(response.statusCode()).isEqualTo(405);
+		assertThat(response.body()).contains("\"code\":\"METHOD_NOT_ALLOWED\"");
+		assertThat(response.headers().firstValue("Allow")).hasValue("DELETE");
 	}
 
 	@Test

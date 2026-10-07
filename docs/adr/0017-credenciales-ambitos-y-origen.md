@@ -1,6 +1,6 @@
 # ADR-0017 — Credenciales: API keys con ámbitos y origen restringible; rotación de la credencial de administración
 
-- **Estado:** Accepted (owner, 2026-10-05)
+- **Estado:** Accepted (owner, 2026-10-05); el punto "caché ≤ 60 s" queda superseded por ADR-0019
 - **Fecha:** 2026-10-05
 - **Autor:** agente: Claude (auditoría de documentación)
 - **Supersede:** ADR-0004

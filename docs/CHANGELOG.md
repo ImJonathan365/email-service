@@ -24,11 +24,13 @@ Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
   - La evaluación de la política sola cuesta +5–15 % en p50.
   - p95/p99 son ruidosos en este entorno.
   - En total, +40–65 µs por transacción: ~3–5 % del camino de aceptación medido (1,38 ms, `04` §2).
-- **Pendiente de decisión del owner:**
-  - si ese resultado activa el criterio de revisión de ADR-0008 (> 20 %, cumplido por la consulta aislada, no por la transacción de aceptación);
-  - código de error para `405` (hoy `404 RESOURCE_NOT_FOUND`);
-  - sin caché de API keys (`08` §2 revisado);
-  - auditoría agregada y rate limit de `401` por IP, previstos para H7.
+- **Decisiones del owner (2026-10-06, tras H2):**
+  - ADR-0019 (Accepted): sin caché de API keys (revocación en la siguiente petición, AC-03.4 revisado); el criterio de coste de RLS de ADR-0008 se mide sobre la transacción completa y **no** está activado; no se optimiza `set_config`.
+  - Catálogo de errores: se añaden `405 METHOD_NOT_ALLOWED` y `415 UNSUPPORTED_MEDIA_TYPE`.
+  - Los `401` con keys desconocidas se cuentan como métrica (`email_auth_unauthenticated_total`), sin escribir en la BD; auditoría agregada y rate limit de `401` en H7.
+  - Dos contratos OpenAPI (AC-25.2 revisado).
+  - `ADMIN_API_KEYS` solo para `APP_ROLE=api|all`, ≥ 32 caracteres (`05` §6).
+  - Ramas: `main` siempre desplegable, `dev` de integración, `feat/*` por hito (`AGENTS.md`).
 
 ## 2026-10-06 — H1: esquema, roles y RLS
 

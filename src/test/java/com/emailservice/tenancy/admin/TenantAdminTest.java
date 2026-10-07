@@ -189,6 +189,23 @@ class TenantAdminTest extends IntegrationTest {
 	}
 
 	@Test
+	void nonJsonBodyIsUnsupportedMediaType() throws Exception {
+		HttpResponse<String> response = admin(http().post("/admin/v1/tenants"))
+			.header("Content-Type", "text/plain")
+			.send();
+		assertThat(response.statusCode()).isEqualTo(415);
+		assertThat(response.body()).contains("\"code\":\"UNSUPPORTED_MEDIA_TYPE\"");
+	}
+
+	@Test
+	void unsupportedMethodIsMethodNotAllowed() throws Exception {
+		HttpResponse<String> response = admin(http().delete("/admin/v1/tenants")).send();
+		assertThat(response.statusCode()).isEqualTo(405);
+		assertThat(response.body()).contains("\"code\":\"METHOD_NOT_ALLOWED\"");
+		assertThat(response.headers().firstValue("Allow")).hasValue("GET, POST");
+	}
+
+	@Test
 	void malformedJsonIsBadRequest() throws Exception {
 		HttpResponse<String> response = admin(http().post("/admin/v1/tenants")).json("{\"slug\": ").send();
 		assertThat(response.statusCode()).isEqualTo(400);
