@@ -11,7 +11,7 @@
 | Base de datos | **PostgreSQL 18** | 18.6 (soporte hasta 2030-11-14) |
 | Acceso a datos | **Spring Data JDBC** (sin JPA/Hibernate) + **Flyway**, dos `DataSource` (tenant con RLS / sistema) | Gestionadas por el BOM |
 | Cola de trabajos | **PostgreSQL** (`FOR UPDATE SKIP LOCKED` + `lock_token` + prioridad) | — (sin broker) |
-| Plantillas | **Handlebars.java** endurecido (ADR-0011) + jsoup para el linter | 4.5.x (fecha de la última versión a confirmar) |
+| Plantillas | **Handlebars.java** endurecido (ADR-0011) + jsoup para el linter | **(rev. 2026-10-06)** Handlebars.java 4.5.5 (2026-09-14), sin Nashorn; jsoup 1.23.2 |
 | Proveedor de correo | **Resend** vía su API HTTP (alternativas: Postmark, Amazon SES) | API actual |
 | SMTP de desarrollo | **Mailpit** | Última |
 | Documentación API | **springdoc-openapi** | Compatible con Boot 4.1 |
