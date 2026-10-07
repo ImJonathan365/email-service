@@ -25,6 +25,12 @@ dependencies {
 	implementation(libs.spring.boot.starter.webmvc)
 	implementation(libs.flyway.database.postgresql)
 	implementation(libs.springdoc.openapi.webmvc.ui)
+	// Template engine (ADR-0011) and the HTML parser of its linter. Nashorn only backs JavaScript
+	// helpers and precompilation, which the hardened engine never uses: no script engine on the classpath.
+	implementation(libs.handlebars) {
+		exclude(group = "org.openjdk.nashorn")
+	}
+	implementation(libs.jsoup)
 	runtimeOnly(libs.micrometer.registry.prometheus)
 	runtimeOnly(libs.postgresql)
 	testImplementation(libs.spring.boot.starter.actuator.test)
