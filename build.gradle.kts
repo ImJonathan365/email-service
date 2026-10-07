@@ -52,6 +52,7 @@ tasks.bootJar {
 tasks.withType<Test> {
 	inputs.file("scripts/init-db-roles.sql")
 	inputs.files(fileTree("contracts"))
+	inputs.files(fileTree("templates"))
 	systemProperty("contract.update", project.hasProperty("updateContract"))
 }
 
