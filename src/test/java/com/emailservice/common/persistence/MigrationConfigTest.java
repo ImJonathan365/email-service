@@ -44,7 +44,7 @@ class MigrationConfigTest {
 	}
 
 	private static FlywayMigrationStrategy strategyFor(AppEnv env, AppRole role) {
-		return new MigrationConfig().flywayMigrationStrategy(new AppProperties(env, role, DB));
+		return new MigrationConfig().flywayMigrationStrategy(new AppProperties(env, role, DB, null));
 	}
 
 }

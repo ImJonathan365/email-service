@@ -52,3 +52,5 @@ app:
     owner:
       username: ${DB_OWNER_USER:}
       password: ${DB_OWNER_PASSWORD:}
+  http:
+    trusted-proxies: ${TRUSTED_PROXIES:}

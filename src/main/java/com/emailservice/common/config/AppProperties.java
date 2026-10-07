@@ -6,32 +6,36 @@ import java.util.Objects;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import com.emailservice.common.web.Cidr;
+
 /**
  * Environment configuration (docs/05 §6), validated at startup so a misconfigured instance never
- * boots (NFR-09). Error messages name the missing variables, never their values.
+ * boots (NFR-09). Error messages name the offending variables, never secret values.
  */
 @ConfigurationProperties("app")
-public record AppProperties(AppEnv env, AppRole role, Db db) {
+public record AppProperties(AppEnv env, AppRole role, Db db, Http http) {
 
 	public AppProperties {
 		Objects.requireNonNull(env, "APP_ENV is required");
 		Objects.requireNonNull(role, "APP_ROLE is required");
 		Objects.requireNonNull(db, "DB_* configuration is required");
+		http = http == null ? new Http(List.of()) : http;
 
-		List<String> missing = new ArrayList<>();
+		List<String> problems = new ArrayList<>();
 		if (isBlank(db.url())) {
-			missing.add("DB_URL");
+			problems.add("DB_URL is required");
 		}
 		if (role != AppRole.MIGRATE) {
-			Credentials.collectMissing(db.app(), "DB_APP", missing);
-			Credentials.collectMissing(db.system(), "DB_SYSTEM", missing);
+			Credentials.collectMissing(db.app(), "DB_APP", problems);
+			Credentials.collectMissing(db.system(), "DB_SYSTEM", problems);
 		}
 		if (migratesOnStartup(env, role)) {
-			Credentials.collectMissing(db.owner(), "DB_OWNER", missing);
+			Credentials.collectMissing(db.owner(), "DB_OWNER", problems);
 		}
-		if (!missing.isEmpty()) {
-			throw new IllegalStateException("Missing required configuration for APP_ENV=%s APP_ROLE=%s: %s"
-				.formatted(env, role, String.join(", ", missing)));
+		http.validate(problems);
+		if (!problems.isEmpty()) {
+			throw new IllegalStateException("Invalid configuration for APP_ENV=%s APP_ROLE=%s: %s"
+				.formatted(env, role, String.join("; ", problems)));
 		}
 	}
 
@@ -48,23 +52,51 @@ public record AppProperties(AppEnv env, AppRole role, Db db) {
 		return value == null || value.isBlank();
 	}
 
+	private static List<String> trimmed(List<String> values) {
+		return values == null ? List.of() : values.stream().map(String::trim).filter(v -> !v.isEmpty()).toList();
+	}
+
 	public record Db(String url, Credentials app, Credentials system, Credentials owner) {
 	}
 
 	public record Credentials(String username, String password) {
 
-		private static void collectMissing(Credentials credentials, String prefix, List<String> missing) {
+		private static void collectMissing(Credentials credentials, String prefix, List<String> problems) {
 			if (credentials == null || isBlank(credentials.username())) {
-				missing.add(prefix + "_USER");
+				problems.add(prefix + "_USER is required");
 			}
 			if (credentials == null || isBlank(credentials.password())) {
-				missing.add(prefix + "_PASSWORD");
+				problems.add(prefix + "_PASSWORD is required");
 			}
 		}
 
 		@Override
 		public String toString() {
 			return "Credentials[username=" + username + ", password=***]";
+		}
+
+	}
+
+	/** TRUSTED_PROXIES: proxies whose X-Forwarded-For is believed (AC-33.3). */
+	public record Http(List<String> trustedProxies) {
+
+		public Http {
+			trustedProxies = trimmed(trustedProxies);
+		}
+
+		public List<Cidr> trustedProxyRanges() {
+			return trustedProxies.stream().map(Cidr::parse).toList();
+		}
+
+		private void validate(List<String> problems) {
+			for (String proxy : trustedProxies) {
+				try {
+					Cidr.parse(proxy);
+				}
+				catch (IllegalArgumentException ex) {
+					problems.add("TRUSTED_PROXIES has an invalid CIDR: " + proxy);
+				}
+			}
 		}
 
 	}
