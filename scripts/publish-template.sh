@@ -8,7 +8,8 @@
 # Usage: EMAIL_SERVICE_TEMPLATES_KEY=esk_... [BASE_URL=...] scripts/publish-template.sh {tenant} {templateKey}
 # The key needs templates:write and emails:read and must belong to {tenant}. Locales whose content
 # equals the published version are skipped; the others become drafts, are previewed with
-# previewVariables and are published only if every preview succeeds.
+# previewVariables and are published only if every preview succeeds, all locales in one atomic
+# request (ADR-0020).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -34,7 +35,6 @@ jq -e 'type == "object"' "$DIR/template.json" > /dev/null || die "$DIR/template.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 CREATED=()
-declare -A PUBLISHED=()
 
 # api METHOD PATH [BODY_FILE] -> response body in $WORK/response, HTTP status in $STATUS
 api() {
@@ -52,13 +52,13 @@ problem() {
 		|| cat "$WORK/response"
 }
 
-# Deletes the drafts this run created and did not publish, so a failed run leaves no drafts behind.
-# Versions already published by this run stay published: publication cannot be undone.
+# Deletes the drafts this run created, so a failed run leaves no drafts behind. Publication is a
+# single request (one version, or all locales jointly), so a failed run never publishes anything.
 abort() {
 	echo "publish-template: $1" >&2
 	problem >&2
 	for version in "${CREATED[@]}"; do
-		[[ -n "${PUBLISHED[$version]:-}" ]] || api DELETE "/v1/templates/$KEY/versions/$version" || true
+		api DELETE "/v1/templates/$KEY/versions/$version" || true
 	done
 	exit 1
 }
@@ -129,9 +129,21 @@ for locale in "${changed[@]}"; do
 	echo "$locale: preview OK, subject: $(jq -r .subject "$WORK/response")$(jq -r 'if (.warnings | length) > 0 then " (warnings: \(.warnings | join(", ")))" else "" end' "$WORK/response")"
 done
 
-for locale in "${changed[@]}"; do
+if [[ ${#changed[@]} -eq 1 ]]; then
+	locale="${changed[0]}"
 	api POST "/v1/templates/$KEY/versions/${versions[$locale]}/publish"
 	[[ "$STATUS" == 200 ]] || abort "publishing the $locale draft (version ${versions[$locale]}) failed"
-	PUBLISHED[${versions[$locale]}]=1
 	echo "$locale: published version ${versions[$locale]}."
+	exit 0
+fi
+
+# Several locales: one atomic publication (ADR-0020), so changing the required variables of a
+# multi-locale template works and a failure publishes nothing.
+joint='{"versions": {}}'
+for locale in "${changed[@]}"; do
+	joint="$(jq --arg l "$locale" --argjson v "${versions[$locale]}" '.versions[$l] = $v' <<< "$joint")"
 done
+echo "$joint" > "$WORK/joint"
+api POST "/v1/templates/$KEY/publish" "$WORK/joint"
+[[ "$STATUS" == 200 ]] || abort "publishing ${changed[*]} together failed; nothing was published"
+jq -r '.published[] | "\(.locale): published version \(.version)."' "$WORK/response"

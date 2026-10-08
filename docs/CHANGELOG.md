@@ -28,7 +28,7 @@ Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
   - el script omite los locales sin cambios y el detalle incluye el contenido;
   - `jq`, declarado en `mise.toml`.
 - **Ajuste de documentación:** el ejemplo de AC-37.5 en `en` es `CRC1,500.00` (salida congelada de la JDK 25).
-- **Pendiente de decisión del owner:** con AC-37.6 no se puede cambiar el conjunto `required` de una plantilla con varios locales publicados, porque se publica un locale cada vez y cada uno choca con el otro (reproducido). Opciones: publicar todos los locales en una sola operación, o aceptarlo y crear otra `key`.
+- **Decisión del owner (2026-10-07):** publicación conjunta (ADR-0020, AC-37.8): `POST /v1/templates/{key}/publish` publica varios locales en una transacción, todo o nada. AC-37.6 se valida sobre el conjunto resultante. `publish-template.sh` la usa cuando cambian varios locales. Con esto desaparece la limitación de no poder cambiar `required`.
 - **Fuera de H3** (dependen del envío, H4): fijar la versión en el mensaje, la caída al locale del tenant al enviar (AC-05.3/05.4, 37.2–37.4) y la prioridad (AC-36.2/36.3).
 
 ## 2026-10-06 (tarde) — H2: tenancy

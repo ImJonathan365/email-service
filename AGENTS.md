@@ -5,7 +5,7 @@ Internal, centralized **transactional** email microservice used by my own produc
 
 **Source of truth: `/docs` (Spanish).** Read `docs/10-guia-para-agentes-ia.md` before any change,
 and the specific requirement in `docs/02-requisitos-funcionales.md`. If code and `/docs` disagree, `/docs` wins.
-ADR-0008…0014, 0016, 0017, 0018 and 0019 are Accepted (0019 supersedes the API key cache of 0017); ADR-0015 (attachments) is Rejected — no attachments in the MVP.
+ADR-0008…0014 and 0016…0020 are Accepted (0019 supersedes the API key cache of 0017; 0020 adds joint multi-locale publication to 0018); ADR-0015 (attachments) is Rejected — no attachments in the MVP.
 
 ## Hard rules (no change without owner approval + ADR in docs/adr)
 

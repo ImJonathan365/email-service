@@ -100,9 +100,17 @@ class TemplateController {
 	TemplateViews.VersionPublished publish(@PathVariable String key, @PathVariable int version,
 			HttpServletRequest request) {
 		AuthenticatedApiKey apiKey = AuthenticatedApiKey.from(request);
-		Actor actor = new Actor(Actor.Type.API_KEY, apiKey.keyId().toString(),
-				clientIpResolver.resolve(request).getHostAddress(), RequestIdFilter.current(request));
-		return service.publish(apiKey.tenantId(), key, version, actor);
+		return service.publish(apiKey.tenantId(), key, version, actor(apiKey, request));
+	}
+
+	@PostMapping("/{key}/publish")
+	@RequiresScope(Scope.TEMPLATES_WRITE)
+	@Operation(summary = "Publish one draft per locale atomically: all or none (ADR-0020)")
+	TemplateViews.JointPublished publishJointly(@PathVariable String key,
+			@Valid @RequestBody TemplateViews.JointPublishRequest body, HttpServletRequest request) {
+		AuthenticatedApiKey apiKey = AuthenticatedApiKey.from(request);
+		return new TemplateViews.JointPublished(
+				service.publishJointly(apiKey.tenantId(), key, body.versions(), actor(apiKey, request)));
 	}
 
 	@PostMapping("/{key}/preview")
@@ -111,6 +119,11 @@ class TemplateController {
 	TemplateViews.Preview preview(@PathVariable String key, @RequestBody TemplateViews.PreviewRequest body,
 			HttpServletRequest request) {
 		return previews.preview(tenant(request), key, body);
+	}
+
+	private Actor actor(AuthenticatedApiKey apiKey, HttpServletRequest request) {
+		return new Actor(Actor.Type.API_KEY, apiKey.keyId().toString(), clientIpResolver.resolve(request).getHostAddress(),
+				RequestIdFilter.current(request));
 	}
 
 	private static UUID tenant(HttpServletRequest request) {
