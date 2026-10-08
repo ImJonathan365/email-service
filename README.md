@@ -49,7 +49,11 @@ El script:
 - crea los borradores y los previsualiza con `previewVariables`;
 - publica solo si todas las previsualizaciones pasan; si algo falla, borra los borradores que creó.
 
+- Con varios idiomas cambiados, los publica todos en una sola operación (ADR-0020), lo que permite cambiar las variables obligatorias de una plantilla multilingüe.
+
 La key debe ser de operador (`templates:write` y `emails:read`), nunca la que se despliega en un producto. En CI, `TemplatesAsCodeTest` valida cada plantilla con las mismas reglas que el servicio.
+
+El CI no usa mise ni `jq`: Java lo instala `setup-java` y ningún job ejecuta los scripts. `jq` solo hace falta en local para los scripts; lo instala `mise install`, y en los runners de GitHub ya viene incluido.
 
 Reglas de las plantillas (ADR-0011):
 - Handlebars *logic-less*;

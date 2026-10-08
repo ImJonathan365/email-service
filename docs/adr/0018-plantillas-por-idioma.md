@@ -1,6 +1,6 @@
 # ADR-0018 — Plantillas por idioma (es-CR por defecto, inglés disponible) en el MVP
 
-- **Estado:** Accepted
+- **Estado:** Accepted; complementado por ADR-0020 (publicación conjunta de idiomas)
 - **Fecha:** 2026-10-05
 - **Autor:** agente: Claude, a partir de la respuesta del owner a la pregunta abierta 14
 - **Complementa:** ADR-0011 (no lo supersede: activa su criterio de revisión "necesidad de i18n por locale")

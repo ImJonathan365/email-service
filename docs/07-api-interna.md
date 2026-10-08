@@ -32,6 +32,7 @@ Swagger UI: `/swagger-ui.html` · OpenAPI: `/v3/api-docs/public` y `/v3/api-docs
 | `PUT` | `/v1/templates/{key}/versions/{version}` | Editar borrador | `templates:write` | FR-04 |
 | `DELETE` | `/v1/templates/{key}/versions/{version}` | Borrar borrador (rev. 2026-10-06, AC-04.3) | `templates:write` | FR-04 |
 | `POST` | `/v1/templates/{key}/versions/{version}/publish` | Publicar (inmutable) | `templates:write` | FR-05 |
+| `POST` | `/v1/templates/{key}/publish` | Publicar varios idiomas a la vez, todo o nada (rev. 2026-10-07, ADR-0020) | `templates:write` | FR-05, FR-37 |
 | `POST` | `/v1/templates/{key}/preview` | Renderizar sin enviar | `templates:write` | FR-06 |
 | `GET` | `/v1/suppressions` | Listar supresiones (propias + globales enmascaradas) | `emails:read` | FR-18 |
 | `POST` | `/v1/suppressions` | Añadir supresión manual | `suppressions:write` | FR-18 |
@@ -226,6 +227,19 @@ Incluye `renderedSubject` / `renderedHtml` solo si el tenant tiene `storeRendere
 { "templateVersion": 4, "locale": "es-CR", "status": "DRAFT",
   "subject": "Ana, restablece tu contraseña de Colmena", "html": "<html>…</html>", "text": "Hola Ana…", "warnings": [] }
 ```
+
+**Publicación conjunta (rev. 2026-10-07, ADR-0020)** — `POST /v1/templates/password-reset/publish`
+
+```json
+{ "versions": { "es-CR": 5, "en": 3 } }
+```
+
+**200 OK** → `{ "published": [ { "version": 3, "locale": "en", "status": "PUBLISHED", "publishedAt": "…" }, { "version": 5, "locale": "es-CR", … } ] }`.
+
+Todas las versiones se publican en una transacción, o ninguna:
+- cada clave debe ser el `locale` de su versión; si no, `422 VALIDATION_ERROR` en `versions.{locale}`;
+- los errores de esquema y de URL se reportan con el prefijo `versions.{locale}.`;
+- AC-37.6 se valida sobre lo que queda publicado tras la operación.
 
 **(rev. 2026-10-06) Comportamiento implementado en H3:**
 - **Previsualización:**

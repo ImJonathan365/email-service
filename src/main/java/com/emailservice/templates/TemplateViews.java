@@ -2,9 +2,11 @@ package com.emailservice.templates;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -64,6 +66,14 @@ public final class TemplateViews {
 	}
 
 	public record VersionPublished(int version, String locale, String status, Instant publishedAt) {
+	}
+
+	/** ADR-0020: one draft version per locale, all published in a single transaction. */
+	public record JointPublishRequest(
+			@Schema(example = "{\"es-CR\": 5, \"en\": 3}") @NotEmpty @Size(max = 10) Map<String, Integer> versions) {
+	}
+
+	public record JointPublished(List<VersionPublished> published) {
 	}
 
 	/** FR-06: without templateVersion, the published version of locale (or the tenant's locale). */
