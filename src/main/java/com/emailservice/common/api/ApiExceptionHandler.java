@@ -64,6 +64,12 @@ class ApiExceptionHandler {
 
 	@ExceptionHandler(HttpMessageNotReadableException.class)
 	ResponseEntity<Problem> malformed(HttpMessageNotReadableException ex, HttpServletRequest request) {
+		for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+			if (cause instanceof RequestSizeFilter.PayloadTooLargeException) {
+				return problems.entity(request, ErrorCode.PAYLOAD_TOO_LARGE,
+						"The request body exceeds the maximum allowed size.", List.of());
+			}
+		}
 		return problems.entity(request, ErrorCode.MALFORMED_REQUEST, "The request body could not be read as JSON.",
 				List.of());
 	}

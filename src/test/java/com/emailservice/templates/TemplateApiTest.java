@@ -139,6 +139,17 @@ class TemplateApiTest extends IntegrationTest {
 	}
 
 	@Test
+	void ac_04_10_aMaximumSizeTemplateFitsButHugeBodiesAreCut() throws Exception {
+		String key = key();
+		a.createTemplate(key, "NOTICE");
+		String html = "<p>" + "a".repeat(262_144 - 7) + "</p>";
+		assertThat(a.createVersion(key, "es-CR", "x", html, SCHEMA).statusCode()).isEqualTo(201);
+		HttpResponse<String> huge = a.createVersion(key, "es-CR", "x", "<p>" + "a".repeat(1_100_000) + "</p>", null);
+		assertThat(huge.statusCode()).isEqualTo(413);
+		assertThat(huge.body()).contains("\"code\":\"PAYLOAD_TOO_LARGE\"");
+	}
+
+	@Test
 	void ac_37_1_localeMustBeSupportedAndSchemaMustBeTheSubset() throws Exception {
 		String key = key();
 		a.createTemplate(key, "SECURITY");

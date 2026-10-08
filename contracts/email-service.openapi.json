@@ -33,6 +33,47 @@
         "required" : [ "category", "key", "name" ],
         "type" : "object"
       },
+      "EmailAccepted" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "droppedRecipients" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "failureCode" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "suppressionReason" : {
+            "type" : "string"
+          },
+          "templateKey" : {
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "JointPublishRequest" : {
         "properties" : {
           "versions" : {
@@ -132,6 +173,87 @@
             "type" : "integer"
           }
         },
+        "type" : "object"
+      },
+      "Recipient" : {
+        "properties" : {
+          "email" : {
+            "example" : "ana@example.com",
+            "minLength" : 1,
+            "type" : "string"
+          },
+          "name" : {
+            "example" : "Ana Pérez",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "email" ],
+        "type" : "object"
+      },
+      "SendEmailRequest" : {
+        "properties" : {
+          "bcc" : {
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 5,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "cc" : {
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 5,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "from" : {
+            "description" : "Sender address; its domain must be in the tenant's allowedFromDomains (AC-09.2)",
+            "type" : "string"
+          },
+          "fromName" : {
+            "example" : "Pulpería La Esquina vía Colmena",
+            "type" : "string"
+          },
+          "locale" : {
+            "example" : "es-CR",
+            "type" : "string"
+          },
+          "metadata" : {
+            "type" : "string"
+          },
+          "replyTo" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "items" : {
+              "type" : "string"
+            },
+            "maxItems" : 10,
+            "minItems" : 0,
+            "type" : "array"
+          },
+          "templateKey" : {
+            "example" : "password-reset",
+            "maxLength" : 64,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "$ref" : "#/components/schemas/Recipient"
+          },
+          "variables" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "templateKey", "to", "variables" ],
         "type" : "object"
       },
       "Template" : {
@@ -360,6 +482,46 @@
   },
   "openapi" : "3.1.0",
   "paths" : {
+    "/v1/emails" : {
+      "post" : {
+        "operationId" : "send",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SendEmailRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EmailAccepted"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Send a transactional email: 202 when queued, 200 for an idempotent repeat (FR-07, FR-08)",
+        "tags" : [ "Emails" ]
+      }
+    },
     "/v1/templates" : {
       "get" : {
         "operationId" : "list",

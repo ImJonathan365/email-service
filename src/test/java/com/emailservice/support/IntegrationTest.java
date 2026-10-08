@@ -27,4 +27,8 @@ public abstract class IntegrationTest {
 		return new TestHttp(port);
 	}
 
+	protected int port() {
+		return port;
+	}
+
 }
