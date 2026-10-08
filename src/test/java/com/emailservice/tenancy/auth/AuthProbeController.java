@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.emailservice.common.config.RoleConditions.ConditionalOnApiRole;
 import com.emailservice.tenancy.AuthenticatedApiKey;
 import com.emailservice.tenancy.RequiresScope;
 import com.emailservice.tenancy.Scope;
@@ -24,6 +25,7 @@ import io.swagger.v3.oas.annotations.Hidden;
  * Test-only /v1 endpoints: H2 has no real /v1 API yet, so these exercise authentication, scopes
  * and the tenant context. Hidden from the OpenAPI contract.
  */
+@ConditionalOnApiRole
 @Hidden
 @RestController
 @RequestMapping("/v1/test-probe")

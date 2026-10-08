@@ -8,8 +8,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import com.emailservice.common.api.ProblemWriter;
 import com.emailservice.common.api.RequestIdFilter;
+import com.emailservice.common.config.RoleConditions.ConditionalOnApiRole;
 import com.emailservice.common.web.ClientIpResolver;
 
+@ConditionalOnApiRole
 @Configuration(proxyBeanMethods = false)
 class AuthConfig implements WebMvcConfigurer {
 

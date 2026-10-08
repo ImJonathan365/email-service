@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.emailservice.audit.Actor;
 import com.emailservice.common.api.ListResponse;
 import com.emailservice.common.api.RequestIdFilter;
+import com.emailservice.common.config.RoleConditions.ConditionalOnApiRole;
 import com.emailservice.common.web.ClientIpResolver;
 import com.emailservice.tenancy.AuthenticatedApiKey;
 import com.emailservice.tenancy.RequiresScope;
@@ -29,6 +30,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 /** /v1/templates (docs/07 §2 and §7). The tenant always comes from the API key. */
+@ConditionalOnApiRole
 @RestController
 @RequestMapping("/v1/templates")
 @Tag(name = "Templates")

@@ -9,9 +9,11 @@ import com.emailservice.audit.AuditLog;
 import com.emailservice.common.api.ProblemWriter;
 import com.emailservice.common.api.RequestIdFilter;
 import com.emailservice.common.config.AppProperties;
+import com.emailservice.common.config.RoleConditions.ConditionalOnApiRole;
 import com.emailservice.common.persistence.SystemDataSource;
 import com.emailservice.common.web.ClientIpResolver;
 
+@ConditionalOnApiRole
 @Configuration(proxyBeanMethods = false)
 class AdminConfig {
 

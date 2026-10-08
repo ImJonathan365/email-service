@@ -14,11 +14,13 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.emailservice.common.api.ListResponse;
+import com.emailservice.common.config.RoleConditions.ConditionalOnApiRole;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+@ConditionalOnApiRole
 @RestController
 @RequestMapping("/admin/v1/tenants")
 @Tag(name = "Admin: tenants")
