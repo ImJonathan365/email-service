@@ -28,9 +28,9 @@ import tools.jackson.databind.json.JsonMapper;
  * A tenant ready to send: allowed hosts and sender domains, an operator and a product key, and a
  * password-reset template published in es-CR and en through the API. Addresses are .test only.
  */
-final class SendingTestSupport {
+public final class SendingTestSupport {
 
-	static final JsonMapper JSON = JsonMapper.builder().build();
+	public static final JsonMapper JSON = JsonMapper.builder().build();
 
 	static final String SCHEMA = """
 			{"required": ["firstName", "resetUrl"],
@@ -39,21 +39,21 @@ final class SendingTestSupport {
 			                "amount": {"type": "number"}}}
 			""";
 
-	static final String VARIABLES = "{\"firstName\": \"Ana\", \"resetUrl\": \"https://app.example.test/reset?t=1\"}";
+	public static final String VARIABLES = "{\"firstName\": \"Ana\", \"resetUrl\": \"https://app.example.test/reset?t=1\"}";
 
 	final TestHttp http;
 
-	final AdminApi admin;
+	public final AdminApi admin;
 
-	final AdminApi.Tenant tenant;
+	public final AdminApi.Tenant tenant;
 
-	final AdminApi.Key product;
+	public final AdminApi.Key product;
 
-	final AdminApi.Key operator;
+	public final AdminApi.Key operator;
 
-	final String templateKey;
+	public final String templateKey;
 
-	SendingTestSupport(TestHttp http, String category) throws Exception {
+	public SendingTestSupport(TestHttp http, String category) throws Exception {
 		this.http = http;
 		this.admin = new AdminApi(http);
 		this.tenant = admin.createTenant();
@@ -74,14 +74,14 @@ final class SendingTestSupport {
 		assertThat(published.statusCode()).as(published.body()).isEqualTo(200);
 	}
 
-	void createTemplate(String key, String category) throws Exception {
+	public void createTemplate(String key, String category) throws Exception {
 		HttpResponse<String> response = operator(http.post("/v1/templates"))
 			.json("{\"key\": \"" + key + "\", \"name\": \"Reset\", \"category\": \"" + category + "\"}")
 			.send();
 		assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
 	}
 
-	int createVersion(String key, String locale, String subject) throws Exception {
+	public int createVersion(String key, String locale, String subject) throws Exception {
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("locale", locale);
 		body.put("subjectTemplate", subject);
@@ -95,17 +95,17 @@ final class SendingTestSupport {
 		return JSON.readTree(response.body()).get("version").intValue();
 	}
 
-	TestHttp.Request operator(TestHttp.Request request) {
+	public TestHttp.Request operator(TestHttp.Request request) {
 		return request.header("Authorization", operator.bearer());
 	}
 
 	/** A send request with the given extra fields merged into a valid body. */
-	String body(String extraFields) {
+	public String body(String extraFields) {
 		return "{\"templateKey\": \"" + templateKey + "\", \"to\": {\"email\": \"ana@example.test\", \"name\": \"Ana\"}, "
 				+ "\"variables\": " + VARIABLES + (extraFields.isBlank() ? "" : ", " + extraFields) + "}";
 	}
 
-	HttpResponse<String> send(String body, String idempotencyKey) throws Exception {
+	public HttpResponse<String> send(String body, String idempotencyKey) throws Exception {
 		TestHttp.Request request = http.post("/v1/emails").header("Authorization", product.bearer()).json(body);
 		if (idempotencyKey != null) {
 			request.header("Idempotency-Key", idempotencyKey);
@@ -113,12 +113,12 @@ final class SendingTestSupport {
 		return request.send();
 	}
 
-	static JsonNode json(HttpResponse<String> response) {
+	public static JsonNode json(HttpResponse<String> response) {
 		return JSON.readTree(response.body());
 	}
 
 	/** Reads one message row as JSON through the system role, as an operator inspecting the queue. */
-	static JsonNode row(UUID messageId) throws Exception {
+	public static JsonNode row(UUID messageId) throws Exception {
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
 				PreparedStatement statement = system
 					.prepareStatement("SELECT row_to_json(m)::text FROM email_message m WHERE id = ?")) {
@@ -129,7 +129,7 @@ final class SendingTestSupport {
 		}
 	}
 
-	static long countMessages(UUID tenantId) throws Exception {
+	public static long countMessages(UUID tenantId) throws Exception {
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
 				PreparedStatement statement = system.prepareStatement("SELECT count(*) FROM email_message WHERE tenant_id = ?")) {
 			statement.setObject(1, tenantId);
@@ -141,7 +141,7 @@ final class SendingTestSupport {
 	}
 
 	/** Suppressions arrive through webhooks and the API in H6; tests insert them directly. */
-	static void suppress(String address, String scope, UUID tenantId, String reason) throws Exception {
+	public static void suppress(String address, String scope, UUID tenantId, String reason) throws Exception {
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
 				PreparedStatement statement = system.prepareStatement("""
 						INSERT INTO suppression (id, scope, tenant_id, email, email_hash, reason)
@@ -157,11 +157,37 @@ final class SendingTestSupport {
 		}
 	}
 
-	static byte[] hmac(String address) throws Exception {
+	public static byte[] hmac(String address) throws Exception {
 		Mac mac = Mac.getInstance("HmacSHA256");
 		mac.init(new SecretKeySpec(IntegrationTestEnvironment.SUPPRESSION_HASH_KEY.getBytes(StandardCharsets.UTF_8),
 				"HmacSHA256"));
 		return mac.doFinal(address.trim().toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
+	}
+
+	public void suspend() throws Exception {
+		admin.patchTenant(tenant, "{\"status\": \"SUSPENDED\"}");
+	}
+
+	public void reactivate() throws Exception {
+		admin.patchTenant(tenant, "{\"status\": \"ACTIVE\"}");
+	}
+
+	/** Publishes a single-locale template with the given HTML and schema; returns its key. */
+	public String publishTemplate(String category, String html, String schema) throws Exception {
+		String key = "t-" + UUID.randomUUID().toString().substring(0, 8);
+		createTemplate(key, category);
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("locale", "es-CR");
+		body.put("subjectTemplate", "Asunto");
+		body.put("htmlTemplate", html);
+		body.put("variablesSchema", JSON.readTree(schema));
+		HttpResponse<String> version = operator(http.post("/v1/templates/" + key + "/versions"))
+			.json(JSON.writeValueAsString(body))
+			.send();
+		assertThat(version.statusCode()).as(version.body()).isEqualTo(201);
+		HttpResponse<String> published = operator(http.post("/v1/templates/" + key + "/versions/1/publish")).send();
+		assertThat(published.statusCode()).as(published.body()).isEqualTo(200);
+		return key;
 	}
 
 }

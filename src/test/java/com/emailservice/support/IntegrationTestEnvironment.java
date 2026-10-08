@@ -30,6 +30,8 @@ public final class IntegrationTestEnvironment {
 		registry.add("app.sending.suppression-hash-key", () -> SUPPRESSION_HASH_KEY);
 		// No mail server in tests; sending tests install their own recording sender.
 		registry.add("app.mail.provider", () -> "noop");
+		// Tests drive the queue explicitly (QueueWorker.runOnce) instead of racing a background loop.
+		registry.add("app.worker.autostart", () -> "false");
 	}
 
 }
