@@ -33,6 +33,35 @@
         "required" : [ "category", "key", "name" ],
         "type" : "object"
       },
+      "JointPublishRequest" : {
+        "properties" : {
+          "versions" : {
+            "additionalProperties" : {
+              "format" : "int32",
+              "type" : "integer"
+            },
+            "example" : {
+              "en" : 3,
+              "es-CR" : 5
+            },
+            "minProperties" : 1,
+            "type" : "object"
+          }
+        },
+        "required" : [ "versions" ],
+        "type" : "object"
+      },
+      "JointPublished" : {
+        "properties" : {
+          "published" : {
+            "items" : {
+              "$ref" : "#/components/schemas/VersionPublished"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
       "ListResponseTemplateSummary" : {
         "properties" : {
           "data" : {
@@ -450,6 +479,46 @@
           "apiKey" : [ ]
         } ],
         "summary" : "Render a version with sample variables without sending anything (FR-06)",
+        "tags" : [ "Templates" ]
+      }
+    },
+    "/v1/templates/{key}/publish" : {
+      "post" : {
+        "operationId" : "publishJointly",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JointPublishRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/JointPublished"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Publish one draft per locale atomically: all or none (ADR-0020)",
         "tags" : [ "Templates" ]
       }
     },

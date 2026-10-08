@@ -2,9 +2,11 @@ package com.emailservice.templates;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -122,49 +124,99 @@ class TemplateService {
 		templates.deleteDraft(tenantId, draft(tenantId, key, version).id());
 	}
 
-	/**
-	 * Publishes a draft (FR-05): schema required (AC-05.5), URL variables declared as uri
-	 * (AC-04.8), the same required variables as the other published locales (AC-37.6). The
-	 * previous published version of the same locale is archived (AC-05.2, AC-37.1). Audited.
-	 */
+	/** Publishes one draft; its locale comes from the version itself (FR-05). */
 	@Transactional
 	TemplateViews.VersionPublished publish(UUID tenantId, String key, int version, Actor actor) {
-		TemplateViews.StoredVersion draft = draft(tenantId, key, version);
-		if (draft.variablesSchema() == null) {
-			throw ApiException.validation(List.of(new FieldError("variablesSchema", "is required to publish")));
-		}
-		VariablesSchema schema = VariablesSchema.parse(schemaNode(draft.variablesSchema()), "variablesSchema");
-		List<FieldError> urlErrors = HtmlLinter.checkUrlVariables(draft.htmlTemplate(), schema);
-		if (!urlErrors.isEmpty()) {
-			throw new ApiException(ErrorCode.UNSAFE_TEMPLATE_CONSTRUCT,
-					"Variables in URL attributes must be declared with format uri.", urlErrors);
-		}
-		for (TemplateViews.StoredVersion other : templates.versions(tenantId, draft.templateId())) {
-			if ("PUBLISHED".equals(other.status()) && !other.locale().equals(draft.locale())) {
-				Set<String> otherRequired = VariablesSchema
-					.parse(schemaNode(other.variablesSchema()), "variablesSchema")
-					.requiredVariables();
-				if (!otherRequired.equals(schema.requiredVariables())) {
-					throw ApiException.validation(List.of(new FieldError("variablesSchema.required",
-							"must match the published " + other.locale() + " version (version " + other.version()
-									+ "): " + new TreeSet<>(otherRequired))));
-				}
+		TemplateViews.StoredTemplate template = templates.lockByKey(tenantId, key)
+			.orElseThrow(() -> templateNotFound(key));
+		TemplateViews.StoredVersion draft = draftOf(tenantId, template, key, version);
+		return publishAll(tenantId, template, key, Map.of(draft.locale(), version), false, actor).getFirst();
+	}
+
+	/**
+	 * Publishes several drafts, one per locale, atomically (ADR-0020): either all become published
+	 * or none does. AC-37.6 is checked on the set that is published once the operation completes.
+	 */
+	@Transactional
+	List<TemplateViews.VersionPublished> publishJointly(UUID tenantId, String key, Map<String, Integer> versions,
+			Actor actor) {
+		TemplateViews.StoredTemplate template = templates.lockByKey(tenantId, key)
+			.orElseThrow(() -> templateNotFound(key));
+		return publishAll(tenantId, template, key, versions, true, actor);
+	}
+
+	/**
+	 * Requires a schema (AC-05.5) and URL variables declared as uri (AC-04.8) on every draft, then
+	 * archives the previous published version of each locale (AC-05.2, AC-37.1). Callers hold the
+	 * template row lock; any failure aborts the whole transaction.
+	 */
+	private List<TemplateViews.VersionPublished> publishAll(UUID tenantId, TemplateViews.StoredTemplate template,
+			String key, Map<String, Integer> versions, boolean joint, Actor actor) {
+		Map<String, TemplateViews.StoredVersion> drafts = new TreeMap<>();
+		Map<String, Set<String>> requiredAfter = new TreeMap<>();
+		for (TemplateViews.StoredVersion current : templates.versions(tenantId, template.id())) {
+			if ("PUBLISHED".equals(current.status()) && !versions.containsKey(current.locale())) {
+				requiredAfter.put(current.locale() + " (version " + current.version() + ")",
+						schema(current).requiredVariables());
 			}
 		}
+		for (Map.Entry<String, Integer> entry : new TreeMap<>(versions).entrySet()) {
+			TemplateViews.StoredVersion draft = draftOf(tenantId, template, key, entry.getValue());
+			// Joint requests address errors by locale; the single-version endpoint keeps plain field names.
+			String prefix = joint ? "versions." + entry.getKey() + "." : "";
+			if (!draft.locale().equals(entry.getKey())) {
+				throw ApiException.validation(List.of(new FieldError("versions." + entry.getKey(),
+						"version " + draft.version() + " is a " + draft.locale() + " version")));
+			}
+			if (draft.variablesSchema() == null) {
+				throw ApiException.validation(List.of(new FieldError(prefix + "variablesSchema",
+						"is required to publish (version " + draft.version() + ")")));
+			}
+			VariablesSchema schema = schema(draft);
+			List<FieldError> urlErrors = HtmlLinter.checkUrlVariables(draft.htmlTemplate(), schema);
+			if (!urlErrors.isEmpty()) {
+				throw new ApiException(ErrorCode.UNSAFE_TEMPLATE_CONSTRUCT,
+						"Variables in URL attributes must be declared with format uri (version " + draft.version() + ").",
+						urlErrors);
+			}
+			drafts.put(entry.getKey(), draft);
+			requiredAfter.put(draft.locale() + " (version " + draft.version() + ")", schema.requiredVariables());
+		}
+		if (new HashSet<>(requiredAfter.values()).size() > 1) {
+			List<FieldError> errors = requiredAfter.entrySet()
+				.stream()
+				.map(e -> new FieldError("variablesSchema.required", e.getKey() + " requires " + new TreeSet<>(e.getValue())))
+				.toList();
+			throw new ApiException(ErrorCode.VALIDATION_ERROR,
+					"All published locales must require the same variables (AC-37.6).", errors);
+		}
 
-		templates.archivePublished(tenantId, draft.templateId(), draft.locale());
-		TemplateViews.StoredVersion published = templates.publish(tenantId, draft.id());
-		auditLog.record(templates.jdbc(), actor, AuditAction.TEMPLATE_PUBLISHED, tenantId, "template_version",
-				published.id().toString(),
-				Map.of("templateKey", key, "version", published.version(), "locale", published.locale()));
-		return new TemplateViews.VersionPublished(published.version(), published.locale(), published.status(),
-				published.publishedAt());
+		List<TemplateViews.VersionPublished> result = new ArrayList<>();
+		for (TemplateViews.StoredVersion draft : drafts.values()) {
+			templates.archivePublished(tenantId, template.id(), draft.locale());
+			TemplateViews.StoredVersion published = templates.publish(tenantId, draft.id());
+			auditLog.record(templates.jdbc(), actor, AuditAction.TEMPLATE_PUBLISHED, tenantId, "template_version",
+					published.id().toString(),
+					Map.of("templateKey", key, "version", published.version(), "locale", published.locale()));
+			result.add(new TemplateViews.VersionPublished(published.version(), published.locale(), published.status(),
+					published.publishedAt()));
+		}
+		return result;
+	}
+
+	private VariablesSchema schema(TemplateViews.StoredVersion version) {
+		return VariablesSchema.parse(schemaNode(version.variablesSchema()), "variablesSchema");
 	}
 
 	/** A version that can still change; published and archived ones are immutable (AC-05.1). */
 	private TemplateViews.StoredVersion draft(UUID tenantId, String key, int version) {
 		TemplateViews.StoredTemplate template = templates.lockByKey(tenantId, key)
 			.orElseThrow(() -> templateNotFound(key));
+		return draftOf(tenantId, template, key, version);
+	}
+
+	private TemplateViews.StoredVersion draftOf(UUID tenantId, TemplateViews.StoredTemplate template, String key,
+			int version) {
 		TemplateViews.StoredVersion stored = templates.version(tenantId, template.id(), version)
 			.orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND,
 					"Version " + version + " of template '" + key + "' not found."));

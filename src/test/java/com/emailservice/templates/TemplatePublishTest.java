@@ -114,6 +114,82 @@ class TemplatePublishTest extends IntegrationTest {
 		assertThat(response.body()).contains("\"field\":\"variablesSchema.required\"").contains("es-CR");
 	}
 
+	static final String SCHEMA_WITH_EXPIRY = """
+			{"required": ["firstName", "resetUrl", "expiresInMinutes"],
+			 "properties": {"firstName": {"type": "string"}, "resetUrl": {"type": "string", "format": "uri"},
+			                "expiresInMinutes": {"type": "integer"}}}
+			""";
+
+	HttpResponse<String> publishJointly(String versions, String requestId) throws Exception {
+		return as(a.operator, http().post("/v1/templates/" + key + "/publish"))
+			.header("X-Request-Id", requestId)
+			.json("{\"versions\": " + versions + "}")
+			.send();
+	}
+
+	@Test
+	void adr_0020_jointPublishChangesRequiredVariablesAcrossLocales() throws Exception {
+		a.createVersion(key, "es-CR", "x", HTML, SCHEMA);
+		a.createVersion(key, "en", "x", HTML, SCHEMA);
+		publish(1);
+		publish(2);
+		a.createVersion(key, "es-CR", "x", HTML, SCHEMA_WITH_EXPIRY);
+		a.createVersion(key, "en", "x", HTML, SCHEMA_WITH_EXPIRY);
+		assertThat(publish(3).statusCode()).as("one locale at a time cannot change required").isEqualTo(422);
+
+		String requestId = "test-" + UUID.randomUUID();
+		HttpResponse<String> response = publishJointly("{\"es-CR\": 3, \"en\": 4}", requestId);
+
+		assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+		assertThat(response.body()).contains("\"published\":[").contains("\"version\":3").contains("\"version\":4");
+		assertThat(detail()).containsPattern("\"version\":1,\"locale\":\"es-CR\",\"status\":\"ARCHIVED\"")
+			.containsPattern("\"version\":2,\"locale\":\"en\",\"status\":\"ARCHIVED\"")
+			.containsPattern("\"version\":3,\"locale\":\"es-CR\",\"status\":\"PUBLISHED\"")
+			.containsPattern("\"version\":4,\"locale\":\"en\",\"status\":\"PUBLISHED\"");
+		assertThat(AuditRows.forRequest(requestId)).extracting(AuditRows.Row::action)
+			.containsExactly("TEMPLATE_PUBLISHED", "TEMPLATE_PUBLISHED");
+	}
+
+	@Test
+	void adr_0020_jointPublishIsAllOrNothing() throws Exception {
+		a.createVersion(key, "es-CR", "x", HTML, SCHEMA);
+		publish(1);
+		a.createVersion(key, "es-CR", "new", HTML, SCHEMA_WITH_EXPIRY);
+		a.createVersion(key, "en", "x", "<a href=\"{{firstName}}\">x</a>", SCHEMA_WITH_EXPIRY);
+
+		String requestId = "test-" + UUID.randomUUID();
+		HttpResponse<String> response = publishJointly("{\"es-CR\": 2, \"en\": 3}", requestId);
+
+		assertThat(response.statusCode()).isEqualTo(422);
+		assertThat(response.body()).contains("\"code\":\"UNSAFE_TEMPLATE_CONSTRUCT\"");
+		assertThat(detail()).containsPattern("\"version\":1,\"locale\":\"es-CR\",\"status\":\"PUBLISHED\"")
+			.containsPattern("\"version\":2,\"locale\":\"es-CR\",\"status\":\"DRAFT\"")
+			.containsPattern("\"version\":3,\"locale\":\"en\",\"status\":\"DRAFT\"");
+		assertThat(AuditRows.forRequest(requestId)).isEmpty();
+	}
+
+	@Test
+	void adr_0020_requiredIsCheckedOnTheResultingPublishedSet() throws Exception {
+		a.createVersion(key, "es-CR", "x", HTML, SCHEMA);
+		a.createVersion(key, "en", "x", HTML, SCHEMA);
+		publish(1);
+		publish(2);
+		a.createVersion(key, "es-CR", "x", HTML, SCHEMA_WITH_EXPIRY);
+
+		HttpResponse<String> response = publishJointly("{\"es-CR\": 3}", "test-" + UUID.randomUUID());
+		assertThat(response.statusCode()).isEqualTo(422);
+		assertThat(response.body()).contains("\"field\":\"variablesSchema.required\"").contains("en (version 2)");
+	}
+
+	@Test
+	void adr_0020_versionsMustMatchTheirLocaleAndTheRequestCannotBeEmpty() throws Exception {
+		a.createVersion(key, "es-CR", "x", HTML, SCHEMA);
+		assertThat(publishJointly("{\"en\": 1}", "test-" + UUID.randomUUID()).body()).contains("\"field\":\"versions.en\"");
+		assertThat(publishJointly("{}", "test-" + UUID.randomUUID()).statusCode()).isEqualTo(422);
+		assertThat(publishJointly("{\"es-CR\": 99}", "test-" + UUID.randomUUID()).statusCode()).isEqualTo(404);
+		assertThat(detail()).contains("\"status\":\"DRAFT\"");
+	}
+
 	@Test
 	void anotherTenantCannotPublish() throws Exception {
 		a.createVersion(key, "es-CR", "x", HTML, SCHEMA);
@@ -121,6 +197,10 @@ class TemplatePublishTest extends IntegrationTest {
 		HttpResponse<String> response = as(b.operator,
 				http().post("/v1/templates/" + key + "/versions/1/publish")).send();
 		assertThat(response.statusCode()).isEqualTo(404);
+		HttpResponse<String> joint = as(b.operator, http().post("/v1/templates/" + key + "/publish"))
+			.json("{\"versions\": {\"es-CR\": 1}}")
+			.send();
+		assertThat(joint.statusCode()).isEqualTo(404);
 		assertThat(detail()).contains("\"status\":\"DRAFT\"");
 	}
 
