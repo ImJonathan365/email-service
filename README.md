@@ -4,7 +4,7 @@ Microservicio interno de correo **transaccional** para PipeMend, Colmena, Chinam
 
 La fuente de verdad es [`docs/`](docs/README.md). Reglas para asistentes de IA: [`AGENTS.md`](AGENTS.md).
 
-> Estado: hitos H1 (esqueleto), H2 (tenancy) y H3 (plantillas). El envío llega en H4 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
+> Estado: hitos H1 (esqueleto), H2 (tenancy), H3 (plantillas) y H4 (envío de extremo a extremo con SMTP hacia Mailpit). El proveedor real (Resend) llega en H5 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
 
 ## Arranque local
 
@@ -16,6 +16,7 @@ Requisitos:
 cp .env.example .env            # solo marcadores locales; .env está en .gitignore
 docker compose up --build       # app (APP_ROLE=all) + PostgreSQL 18 con 3 roles + Mailpit
 ./scripts/seed-local.sh         # tenant "demo", una key de producto, una de operador y las plantillas de templates/demo
+./scripts/smoke-test.sh         # POST /v1/emails -> cola -> worker -> SMTP -> Mailpit, verificado por su API
 ```
 
 | URL | Qué es |

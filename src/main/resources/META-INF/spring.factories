@@ -1,0 +1,2 @@
+org.springframework.boot.EnvironmentPostProcessor=\
+com.emailservice.common.config.WorkerRoleEnvironment
