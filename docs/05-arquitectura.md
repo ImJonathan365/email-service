@@ -257,10 +257,10 @@ Ejemplo: `templates/demo/password-reset/` (`es-CR` y `en`).
 2. Si la plantilla no existe, la crea. Si existe con otra categoría, falla: cambiar la categoría exige una plantilla nueva (AC-36.4).
 3. Compara cada locale con su versión publicada (asunto, HTML, texto y esquema) y omite los que no cambiaron. Repetir el script sin cambios no crea versiones.
 4. Crea un borrador por cada locale cambiado y lo previsualiza con `previewVariables`, con las mismas reglas que un envío real (esquema, escapado, `allowedLinkHosts`).
-5. Solo si todas las previsualizaciones pasan, publica los borradores. Si algo falla, borra los borradores que creó y termina con error mostrando el `problem+json`. Las versiones que ya llegó a publicar siguen publicadas, porque la publicación no se deshace.
+5. Solo si todas las previsualizaciones pasan, publica. Con un solo locale cambiado usa la publicación individual; con varios, la publicación conjunta (ADR-0020): todos los locales en una transacción, así que se puede cambiar el conjunto `required` de una plantilla multilingüe. Si algo falla, no queda nada publicado: el script borra los borradores que creó y termina con error mostrando el `problem+json`.
 
 Requiere `curl` y `jq` (`jq` está declarado en `mise.toml`). `scripts/seed-local.sh` publica todas las plantillas de `templates/{slug}/` del tenant de demo.
 
 **En CI**, `TemplatesAsCodeTest` pasa cada `template.json` por las mismas comprobaciones que el servicio al guardar, publicar y previsualizar. Una plantilla rota falla el build antes de llegar al script.
 
-**Limitación conocida (AC-37.6):** publicar exige que todos los locales publicados declaren las mismas variables `required`, y se publica un locale cada vez. Por eso no se puede cambiar el conjunto `required` de una plantilla que ya tiene varios locales publicados: el primero en publicarse choca con el otro. Hoy la salida es crear una plantilla con otra `key`, o añadir variables opcionales. Pendiente de decisión del owner.
+**CI:** el workflow no usa mise ni `jq`. Java lo instala `setup-java`, ningún job ejecuta los scripts, y `TemplatesAsCodeTest` valida las plantillas en Java. `jq` solo hace falta para ejecutar los scripts en local (y en los runners de GitHub ya viene instalado).
