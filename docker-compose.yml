@@ -41,6 +41,10 @@ services:
       DB_OWNER_USER: ${DB_OWNER_USER:-email_owner}
       DB_OWNER_PASSWORD: ${DB_OWNER_PASSWORD}
       ADMIN_API_KEYS: ${ADMIN_API_KEYS:?set ADMIN_API_KEYS in .env}
+      SUPPRESSION_HASH_KEY: ${SUPPRESSION_HASH_KEY:?set SUPPRESSION_HASH_KEY in .env}
+      MAIL_PROVIDER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xmx256m}
     ports:
       - "127.0.0.1:8080:8080"

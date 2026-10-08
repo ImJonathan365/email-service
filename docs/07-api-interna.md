@@ -91,6 +91,7 @@ Content-Type: application/json
 | `metadata` | object | No | Opaco para el servicio, máx. 4 KB |
 | `locale` | string | No | **(rev. 2026-10, FR-37)** `es-CR` (default del tenant) \| `en`; si no hay traducción publicada, cae a `tenant.locale` |
 | `fromName` | string | No | **(rev. 2026-10, AC-09.5)** Nombre visible del remitente, ≤ 80 caracteres (p. ej., "Pulpería La Esquina vía Colmena") |
+| `from` | string | No | **(rev. 2026-10-07, AC-09.2)** Dirección del remitente; su dominio (o un subdominio) debe estar en `allowedFromDomains` del tenant, si no `403 FROM_DOMAIN_NOT_ALLOWED`. Por defecto, `tenant.fromEmail` |
 | `sendAt` | string | No | **(rev. 2026-10, FR-31, Should)** ISO-8601 con zona; entre ahora y +30 días; la versión se fija al aceptar |
 | `attachments` | — | — | **No disponible** (FR-30 Won't): se rechaza con `422 VALIDATION_ERROR` |
 
@@ -111,6 +112,29 @@ Content-Type: application/json
 
 - Repetición con la misma `Idempotency-Key` y el mismo cuerpo → **200 OK** con el mismo objeto (no consume rate limit).
 - Destinatario `to` suprimido → **202** con `status = FAILED`, `failureCode = SUPPRESSED` y `suppressionReason` (`HARD_BOUNCE` \| `COMPLAINT` \| `PROVIDER` \| `MANUAL`); el producto puede reintentar con **otra** dirección del usuario si la tiene (o `422 RECIPIENT_SUPPRESSED` si `SUPPRESSION_REJECT_MODE=reject`). **El cliente no debe reintentar este caso.**
+
+**(rev. 2026-10-07) Comportamiento implementado en H4:**
+- **Orden:**
+  1. tenant en pausa (`403 TENANT_SENDING_PAUSED`);
+  2. idempotencia;
+  3. validaciones;
+  4. resolución y fijación de la versión;
+  5. variables, regla de URL y render de prueba;
+  6. supresión;
+  7. punto del rate limit (FR-21, H7);
+  8. `INSERT`.
+
+  Todo ocurre en una transacción de tenant. Una repetición con la misma `Idempotency-Key` y el mismo cuerpo responde `200` antes de cualquier validación.
+- **`request_hash`:** es el SHA-256 del cuerpo canónico; el orden de las claves y los espacios no cuentan. La `Idempotency-Key` admite de 1 a 256 caracteres ASCII imprimibles.
+- **`sendAt`:** responde `422 VALIDATION_ERROR` ("not supported yet", FR-31 llega en H8), en lugar de ignorarse.
+- **`attachments`:** responde `422 VALIDATION_ERROR` (FR-30).
+- **Destinatario `to` suprimido:**
+  - el mensaje se crea en `FAILED` con `failureCode = SUPPRESSED` y `suppressionReason`;
+  - no se guardan sus `variables`, porque nunca se envía;
+  - una repetición devuelve el mismo `suppressionReason`.
+- **`droppedRecipients`:** lista las direcciones de `cc`/`bcc` descartadas por supresión.
+- **Límite de tamaño:** `MAX_REQUEST_BYTES` (`413`) aplica a `/v1/emails`. Los endpoints de plantillas tienen un tope fijo de 1 MiB, porque una versión puede llevar 256 KB de HTML más el texto y el esquema.
+- **Allowlist de destino:** `ALLOWED_RECIPIENT_DOMAINS` acepta el dominio exacto o un subdominio, igual que `allowedFromDomains` y `allowedLinkHosts`.
 
 **Errores:** `400 MALFORMED_REQUEST`, `401 UNAUTHENTICATED`, `403 TENANT_SUSPENDED` / `TENANT_SENDING_PAUSED` / `FROM_DOMAIN_NOT_ALLOWED` / `RECIPIENT_NOT_ALLOWED_IN_ENV` / `INSUFFICIENT_SCOPE` / `IP_NOT_ALLOWED`, `404 TEMPLATE_NOT_FOUND`, `409 IDEMPOTENCY_KEY_REUSED`, `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_ERROR` / `TEMPLATE_VARIABLES_INVALID` / `TEMPLATE_NOT_PUBLISHED` / `INVALID_EMAIL_ADDRESS` / `HEADER_INJECTION_DETECTED` / `UNSAFE_URL` / `SEND_AT_OUT_OF_RANGE` / `RECIPIENT_SUPPRESSED`, `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE`.
 

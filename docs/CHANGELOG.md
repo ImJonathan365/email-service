@@ -2,6 +2,46 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-08 — H4: envío de extremo a extremo
+
+- **Hecho:**
+  - **Configuración validada** de envío, worker y reintentos (AC-13.3, AC-13.7, AC-09.4, AC-15.3).
+  - **Puerto `EmailSender`** con `SmtpEmailSender` (Mailpit) y `NoopEmailSender`. El cliente SMTP solo existe con `MAIL_PROVIDER=smtp`.
+  - **Roles:** API y Swagger solo con `APP_ROLE=api|all`; el worker solo expone Actuator.
+  - **`POST /v1/emails`:**
+    - idempotencia antes de todo y a prueba de concurrencia (AC-08.4);
+    - validaciones de FR-07 y FR-09;
+    - versión fijada por idioma con caída al del tenant;
+    - regla de URL y render de prueba;
+    - supresión global y por tenant;
+    - punto de inserción del rate limit (H7).
+  - **Worker:**
+    - toma corta por prioridad con `attempts++` y `lock_token`;
+    - cierre con *fencing*;
+    - backoff con jitter y `Retry-After`;
+    - barrido de locks vencidos bajo advisory lock;
+    - purga de `x-sensitive` al pasar a `SENT` o a un estado terminal;
+    - `email_time_to_sent_seconds` por categoría.
+  - **`scripts/smoke-test.sh`:** envío de extremo a extremo con verificación en la API de Mailpit.
+- **Decisiones del owner (2026-10-07):**
+  - rate limit en H7, con el punto de inserción ya en la transacción;
+  - circuit breaker y `WORKER_PROVIDER_RPS` en H5;
+  - `spring-boot-starter-mail` confinado a `provider`;
+  - `sendAt` → `422` hasta H8;
+  - `GET /v1/emails/{id}` en H7;
+  - purga de `x-sensitive` en el `UPDATE` con *fencing* y métrica de tiempo hasta `SENT`.
+- **Decisiones del agente, a revisar:**
+  - `MAIL_PROVIDER=noop` no arranca en `production`;
+  - el campo opcional `from` (AC-09.2) se añade a `07` §3, porque no figuraba en la tabla;
+  - un mensaje creado ya en `FAILED`/`SUPPRESSED` no guarda variables;
+  - el intento se descuenta si el tenant queda retenido entre la toma y el envío;
+  - los endpoints de plantillas tienen un tope de cuerpo de 1 MiB.
+- **Medido (NFR-09), clon limpio con `cp .env.example .env && docker compose up --build`:**
+  - con la caché de capas de Docker, 13 s hasta readiness;
+  - sin caché, 89 s de build (casi todo descargas de Gradle) + 11 s de arranque con un volumen nuevo, ≈ 100 s;
+  - seed y smoke test pasan.
+  - **Pendiente de decisión del owner:** el arranque totalmente en frío supera por ≈ 10 s el objetivo de 90 s.
+
 ## 2026-10-06 (noche) — H3: plantillas
 
 - **Hecho:**

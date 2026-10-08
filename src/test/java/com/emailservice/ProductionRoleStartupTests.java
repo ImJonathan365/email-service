@@ -27,6 +27,9 @@ class ProductionRoleStartupTests {
 		IntegrationTestEnvironment.register(registry);
 		registry.add("app.db.owner.username", () -> "");
 		registry.add("app.db.owner.password", () -> "");
+		// Production refuses noop and plain SMTP; this startup test opts into SMTP explicitly.
+		registry.add("app.mail.provider", () -> "smtp");
+		registry.add("app.mail.allow-smtp-in-production", () -> "true");
 	}
 
 	@Autowired

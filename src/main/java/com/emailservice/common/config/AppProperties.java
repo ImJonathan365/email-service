@@ -2,6 +2,7 @@ package com.emailservice.common.config;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -14,7 +15,8 @@ import com.emailservice.common.web.Cidr;
  * boots (NFR-09). Error messages name the offending variables, never secret values.
  */
 @ConfigurationProperties("app")
-public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin admin, Tenancy tenancy) {
+public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin admin, Tenancy tenancy, Mail mail,
+		Sending sending, Worker worker) {
 
 	public AppProperties {
 		Objects.requireNonNull(env, "APP_ENV is required");
@@ -23,6 +25,9 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 		http = http == null ? new Http(List.of()) : http;
 		admin = admin == null ? new Admin(List.of()) : admin;
 		tenancy = tenancy == null ? Tenancy.DEFAULTS : tenancy;
+		mail = mail == null ? Mail.DEFAULTS : mail;
+		sending = sending == null ? Sending.DEFAULTS : sending;
+		worker = worker == null ? Worker.DEFAULTS : worker;
 
 		List<String> problems = new ArrayList<>();
 		if (isBlank(db.url())) {
@@ -40,6 +45,11 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			admin.validate(problems);
 		}
 		tenancy.validate(problems);
+		if (role != AppRole.MIGRATE) {
+			mail.validate(env, problems);
+			sending.validate(env, problems);
+			worker.validate(mail, problems);
+		}
 		if (!problems.isEmpty()) {
 			throw new IllegalStateException("Invalid configuration for APP_ENV=%s APP_ROLE=%s: %s"
 				.formatted(env, role, String.join("; ", problems)));
@@ -161,6 +171,130 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			}
 			if (supportedLocales.isEmpty() || !KNOWN_LOCALES.containsAll(supportedLocales)) {
 				problems.add("SUPPORTED_LOCALES must be a non-empty subset of " + KNOWN_LOCALES);
+			}
+		}
+
+	}
+
+	/** MAIL_PROVIDER and SMTP settings (FR-14, FR-15). SMTP is for local development only (ADR-0016). */
+	public record Mail(String provider, String smtpHost, int smtpPort, boolean allowSmtpInProduction,
+			int connectTimeoutMs, int readTimeoutMs) {
+
+		public static final String SMTP = "smtp";
+
+		public static final String NOOP = "noop";
+
+		static final Mail DEFAULTS = new Mail(SMTP, "mailpit", 1025, false, 3_000, 10_000);
+
+		public Mail {
+			provider = provider == null ? SMTP : provider.trim().toLowerCase(Locale.ROOT);
+		}
+
+		private void validate(AppEnv env, List<String> problems) {
+			switch (provider) {
+				case SMTP -> {
+					if (env == AppEnv.PRODUCTION && !allowSmtpInProduction) {
+						problems.add("MAIL_PROVIDER=smtp is not allowed in production (set ALLOW_SMTP_IN_PRODUCTION only "
+								+ "if you really mean it, AC-15.3)");
+					}
+					if (isBlank(smtpHost) || smtpPort < 1 || smtpPort > 65_535) {
+						problems.add("SMTP_HOST and SMTP_PORT are required with MAIL_PROVIDER=smtp");
+					}
+				}
+				case NOOP -> {
+					// A no-op sender in production would silently drop every email.
+					if (env == AppEnv.PRODUCTION) {
+						problems.add("MAIL_PROVIDER=noop is not allowed in production");
+					}
+				}
+				case "resend" -> problems.add("MAIL_PROVIDER=resend is not available yet (milestone H5)");
+				default -> problems.add("MAIL_PROVIDER must be smtp or noop");
+			}
+			if (connectTimeoutMs <= 0 || readTimeoutMs <= 0) {
+				problems.add("PROVIDER_CONNECT_TIMEOUT_MS and PROVIDER_READ_TIMEOUT_MS must be positive");
+			}
+		}
+
+	}
+
+	/** Acceptance settings (FR-07, FR-09, FR-10). */
+	public record Sending(String suppressionHashKey, String suppressionRejectMode, List<String> allowedRecipientDomains,
+			int maxRequestBytes) {
+
+		static final int MIN_HASH_KEY_LENGTH = 32;
+
+		static final Sending DEFAULTS = new Sending("", "accept", List.of(), 262_144);
+
+		public Sending {
+			suppressionRejectMode = suppressionRejectMode == null ? "accept"
+					: suppressionRejectMode.trim().toLowerCase(Locale.ROOT);
+			allowedRecipientDomains = trimmed(allowedRecipientDomains).stream()
+				.map(domain -> domain.toLowerCase(Locale.ROOT))
+				.toList();
+		}
+
+		public boolean rejectSuppressed() {
+			return "reject".equals(suppressionRejectMode);
+		}
+
+		private void validate(AppEnv env, List<String> problems) {
+			if (suppressionHashKey == null || suppressionHashKey.length() < MIN_HASH_KEY_LENGTH) {
+				problems.add("SUPPRESSION_HASH_KEY is required (at least " + MIN_HASH_KEY_LENGTH + " characters)");
+			}
+			if (!"accept".equals(suppressionRejectMode) && !"reject".equals(suppressionRejectMode)) {
+				problems.add("SUPPRESSION_REJECT_MODE must be accept or reject");
+			}
+			if (env == AppEnv.STAGING && allowedRecipientDomains.isEmpty()) {
+				problems.add("ALLOWED_RECIPIENT_DOMAINS is required in staging (AC-09.4)");
+			}
+			if (maxRequestBytes < 1_024) {
+				problems.add("MAX_REQUEST_BYTES must be at least 1024");
+			}
+		}
+
+		@Override
+		public String toString() {
+			return "Sending[suppressionHashKey=***, suppressionRejectMode=" + suppressionRejectMode
+					+ ", allowedRecipientDomains=" + allowedRecipientDomains + ", maxRequestBytes=" + maxRequestBytes + "]";
+		}
+
+	}
+
+	/** Queue and retry settings (FR-12, FR-13, ADR-0010). */
+	public record Worker(int concurrency, int pollIntervalMs, int maxAttempts, List<Integer> retryBackoffSeconds,
+			int lockTimeoutSeconds) {
+
+		/** Resend keeps idempotency keys for 24 h; every attempt must fall inside 23 h (AC-13.7). */
+		static final long RETRY_WINDOW_SECONDS = 23 * 3_600;
+
+		static final Worker DEFAULTS = new Worker(4, 1_000, 6, List.of(60, 300, 900, 3_600, 21_600), 60);
+
+		public Worker {
+			retryBackoffSeconds = retryBackoffSeconds == null ? List.of() : List.copyOf(retryBackoffSeconds);
+		}
+
+		private void validate(Mail mail, List<String> problems) {
+			if (concurrency < 1 || concurrency > 64) {
+				problems.add("WORKER_CONCURRENCY must be between 1 and 64");
+			}
+			if (pollIntervalMs < 100 || pollIntervalMs > 60_000) {
+				problems.add("WORKER_POLL_INTERVAL_MS must be between 100 and 60000");
+			}
+			if (retryBackoffSeconds.isEmpty() || retryBackoffSeconds.stream().anyMatch(s -> s == null || s <= 0)) {
+				problems.add("RETRY_BACKOFF_SECONDS must be a list of positive seconds");
+				return;
+			}
+			if (maxAttempts != retryBackoffSeconds.size() + 1) {
+				problems.add("MAX_ATTEMPTS must equal the number of RETRY_BACKOFF_SECONDS waits + 1 (AC-13.3)");
+			}
+			// A lock must outlive the slowest provider call, or a healthy send would be reclaimed.
+			if (lockTimeoutSeconds * 1_000L <= (long) mail.connectTimeoutMs() + mail.readTimeoutMs()) {
+				problems.add("LOCK_TIMEOUT_SECONDS must exceed the provider connect + read timeouts");
+			}
+			long window = Math.round(retryBackoffSeconds.stream().mapToLong(Integer::longValue).sum() * 1.2)
+					+ (long) maxAttempts * lockTimeoutSeconds;
+			if (window >= RETRY_WINDOW_SECONDS) {
+				problems.add("RETRY_BACKOFF_SECONDS x 1.2 + MAX_ATTEMPTS x LOCK_TIMEOUT_SECONDS must stay under 23 h (AC-13.7)");
 			}
 		}
 

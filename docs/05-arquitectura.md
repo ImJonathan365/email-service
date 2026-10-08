@@ -124,6 +124,20 @@ Reglas de dependencia (verificables con ArchUnit):
 | **Bloqueante** | Destinatario suprimido | `FAILED` (`SUPPRESSED`) |
 | **Retención** (rev. 2026-10) | Tenant suspendido o en pausa | **No** se toma; sigue `QUEUED` hasta reactivarse |
 
+**(rev. 2026-10-07) Comportamiento implementado en H4:**
+- **Cierre con *fencing*:** todo cierre (`SENT`, `FAILED`, vuelta a `QUEUED`) lleva `WHERE status = 'SENDING' AND lock_token = :mine`. Con 0 filas, el worker solo añade `LOST_LOCK` a `attempt_log` y suma `email_lost_lock_total`.
+- **Purga de variables (AC-23.5):**
+  - el mismo `UPDATE` que pasa a `SENT` elimina las variables `x-sensitive`, pero no fija `finalized_at`, porque `SENT` no es terminal;
+  - `FAILED`, incluido el que deja el barrido, elimina las `x-sensitive` y sí fija `finalized_at`.
+- **Tenant suspendido o pausado** entre la toma y el envío: el mensaje vuelve a `QUEUED` y se descuenta el intento (`attempts - 1`), porque retener no es fallar.
+- **Error inesperado** (BD caída, bug): el mensaje se deja en `SENDING`; lo recupera el barrido al vencer el lock y el proveedor deduplica por `message.id`.
+- **Métricas:**
+  - `email_time_to_sent_seconds{category}` (NFR-19), de `created_at` a `SENT`;
+  - `email_lost_lock_total`;
+  - `email_locale_fallback_total`;
+  - `email_requests_without_idempotency_total`.
+- **Pendiente para H5:** el circuit breaker y `WORKER_PROVIDER_RPS`, junto con Resend.
+
 Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_ATTEMPTS` = 6 (5 esperas + 1). Ventana total < 23 h, validada al arrancar (AC-13.7). Un `429` con `Retry-After` respeta ese valor.
 
 **Salvaguardas anti-duplicados (rev. 2026-10):**
@@ -142,7 +156,7 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `purgeIdempotencyKeys` | Horaria | Claves de idempotencia vencidas |
 | `emitQueueMetrics` | 30 s | Profundidad, antigüedad y mensajes retenidos |
 
-Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisory_xact_lock(hashtext('<tarea>'))`: si otra instancia la tiene, se salta esa vuelta. **(rev. 2026-10)** Se elimina la tabla `scheduled_lock`. No se añade Quartz ni ShedLock.
+**(rev. 2026-10-07)** En H4 existe `reclaimStuckMessages`; las demás tareas llegan con sus hitos. Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisory_xact_lock(hashtext('<tarea>'))`: si otra instancia la tiene, se salta esa vuelta. **(rev. 2026-10)** Se elimina la tabla `scheduled_lock`. No se añade Quartz ni ShedLock.
 
 ## 6. Configuración (variables de entorno) (rev. 2026-10)
 
@@ -156,7 +170,7 @@ Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisor
 | `DB_OWNER_USER` / `DB_OWNER_PASSWORD` | — | Rol `email_owner`, solo con `APP_ROLE=migrate` |
 | `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default). **(rev. 2026-10-06)** Solo se exige con `APP_ROLE=api\|all` (el worker y `migrate` nunca la reciben); cada una de ≥ 32 caracteres |
 | `TRUSTED_PROXIES` | *(vacío)* | CIDR de proxies cuya `X-Forwarded-For` se acepta |
-| `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop` |
+| `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `resend` llega en H5; `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
 | `RESEND_API_KEY` | — | Solo si `MAIL_PROVIDER=resend` |
 | `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación |
 | `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp |
@@ -181,7 +195,7 @@ Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisor
 | `SEND_AT_MAX_DAYS` | `30` | FR-31 |
 | `SUPPORTED_LOCALES` | `es-CR,en` | FR-37 |
 | `SUPPRESSION_REJECT_MODE` | `accept` | `accept` (202 + `FAILED`) \| `reject` (422) |
-| `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria) |
+| `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria). **(rev. 2026-10-07)** ≥ 32 caracteres; se exige en todos los roles salvo `migrate` |
 | `ALLOWED_RECIPIENT_DOMAINS` | *(vacío)* | Allowlist de destino; **obligatoria** en `staging` |
 | `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta |
 | `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34 |
