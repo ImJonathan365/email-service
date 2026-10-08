@@ -156,7 +156,7 @@ Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisor
 | `DB_OWNER_USER` / `DB_OWNER_PASSWORD` | — | Rol `email_owner`, solo con `APP_ROLE=migrate` |
 | `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default). **(rev. 2026-10-06)** Solo se exige con `APP_ROLE=api\|all` (el worker y `migrate` nunca la reciben); cada una de ≥ 32 caracteres |
 | `TRUSTED_PROXIES` | *(vacío)* | CIDR de proxies cuya `X-Forwarded-For` se acepta |
-| `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop` |
+| `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `resend` llega en H5; `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
 | `RESEND_API_KEY` | — | Solo si `MAIL_PROVIDER=resend` |
 | `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación |
 | `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp |
@@ -181,7 +181,7 @@ Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisor
 | `SEND_AT_MAX_DAYS` | `30` | FR-31 |
 | `SUPPORTED_LOCALES` | `es-CR,en` | FR-37 |
 | `SUPPRESSION_REJECT_MODE` | `accept` | `accept` (202 + `FAILED`) \| `reject` (422) |
-| `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria) |
+| `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria). **(rev. 2026-10-07)** ≥ 32 caracteres; se exige en todos los roles salvo `migrate` |
 | `ALLOWED_RECIPIENT_DOMAINS` | *(vacío)* | Allowlist de destino; **obligatoria** en `staging` |
 | `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta |
 | `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34 |

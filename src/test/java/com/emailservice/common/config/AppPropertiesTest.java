@@ -25,12 +25,24 @@ class AppPropertiesTest {
 	static final String ADMIN_KEY = "admin-secret-0123456789abcdef0123456789";
 	static final Admin ADMIN = new Admin(List.of(ADMIN_KEY));
 
+	static final AppProperties.Mail NOOP_MAIL = new AppProperties.Mail("noop", null, 0, false, 3_000, 10_000);
+
+	static final AppProperties.Sending SENDING = new AppProperties.Sending("hash-key-0123456789abcdef0123456789",
+			"accept", List.of(), 262_144);
+
 	static AppProperties props(AppEnv env, AppRole role, Db db) {
-		return new AppProperties(env, role, db, null, ADMIN, null);
+		return new AppProperties(env, role, db, null, ADMIN, null, mailFor(env), SENDING, null);
+	}
+
+	/** Production refuses noop and plain smtp, so production cases use smtp with the explicit override. */
+	static AppProperties.Mail mailFor(AppEnv env) {
+		return env == AppEnv.PRODUCTION ? new AppProperties.Mail("smtp", "mail.internal", 25, true, 3_000, 10_000)
+				: NOOP_MAIL;
 	}
 
 	static AppProperties apiWith(Http http, Admin admin, Tenancy tenancy) {
-		return new AppProperties(AppEnv.PRODUCTION, AppRole.API, new Db(URL, APP, SYSTEM, NONE), http, admin, tenancy);
+		return new AppProperties(AppEnv.PRODUCTION, AppRole.API, new Db(URL, APP, SYSTEM, NONE), http, admin, tenancy,
+				mailFor(AppEnv.PRODUCTION), SENDING, null);
 	}
 
 	@Test
@@ -47,7 +59,7 @@ class AppPropertiesTest {
 	@Test
 	void migrateRoleRequiresOnlyOwnerCredentials() {
 		assertThatNoException().isThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.MIGRATE,
-				new Db(URL, NONE, NONE, OWNER), null, null, null));
+				new Db(URL, NONE, NONE, OWNER), null, null, null, null, null, null));
 		assertThatThrownBy(() -> props(AppEnv.PRODUCTION, AppRole.MIGRATE, new Db(URL, APP, SYSTEM, NONE)))
 			.hasMessageContaining("DB_OWNER_USER")
 			.hasMessageContaining("DB_OWNER_PASSWORD");
@@ -78,10 +90,11 @@ class AppPropertiesTest {
 	void adminKeysAreRequiredOnlyWhereTheApiIsServed() {
 		assertThatThrownBy(() -> apiWith(null, null, null)).hasMessageContaining("ADMIN_API_KEYS is required");
 		assertThatThrownBy(() -> new AppProperties(AppEnv.LOCAL, AppRole.ALL, new Db(URL, APP, SYSTEM, OWNER), null,
-				null, null))
+				null, null, NOOP_MAIL, SENDING, null))
 			.hasMessageContaining("ADMIN_API_KEYS");
 		assertThatNoException().isThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER,
-				new Db(URL, APP, SYSTEM, NONE), null, null, null));
+				new Db(URL, APP, SYSTEM, NONE), null, null, null, mailFor(AppEnv.PRODUCTION), SENDING,
+				null));
 	}
 
 	@Test
@@ -124,6 +137,68 @@ class AppPropertiesTest {
 			.doesNotContain("app-secret");
 		assertThat(props(AppEnv.LOCAL, AppRole.ALL, new Db(URL, APP, SYSTEM, OWNER)).toString())
 			.doesNotContain("app-secret", "system-secret", "owner-secret", ADMIN_KEY);
+	}
+
+	static AppProperties local(AppProperties.Mail mail, AppProperties.Sending sending, AppProperties.Worker worker) {
+		return new AppProperties(AppEnv.LOCAL, AppRole.ALL, new Db(URL, APP, SYSTEM, OWNER), null, ADMIN, null, mail,
+				sending, worker);
+	}
+
+	@Test
+	void ac_15_3_smtpAndNoopAreRefusedInProductionUnlessExplicitlyAllowed() {
+		Db db = new Db(URL, APP, SYSTEM, NONE);
+		assertThatThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null,
+				new AppProperties.Mail("smtp", "mail.internal", 25, false, 3_000, 10_000), SENDING, null))
+			.hasMessageContaining("ALLOW_SMTP_IN_PRODUCTION");
+		assertThatThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null, NOOP_MAIL,
+				SENDING, null))
+			.hasMessageContaining("MAIL_PROVIDER=noop");
+		assertThatThrownBy(() -> local(new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000), SENDING, null))
+			.hasMessageContaining("H5");
+		assertThatThrownBy(() -> local(new AppProperties.Mail("smtp", " ", 0, false, 3_000, 10_000), SENDING, null))
+			.hasMessageContaining("SMTP_HOST");
+		assertThat(local(null, SENDING, null).mail().provider()).isEqualTo("smtp");
+	}
+
+	@Test
+	void suppressionHashKeyIsARequiredSecretAndRejectModeIsClosed() {
+		assertThatThrownBy(() -> local(NOOP_MAIL, new AppProperties.Sending("short-key", "accept", List.of(), 262_144), null))
+			.hasMessageContaining("SUPPRESSION_HASH_KEY")
+			.message()
+			.doesNotContain("short-key");
+		assertThatThrownBy(() -> local(NOOP_MAIL,
+				new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "drop", List.of(), 262_144), null))
+			.hasMessageContaining("SUPPRESSION_REJECT_MODE");
+		assertThat(local(NOOP_MAIL, SENDING, null).toString()).doesNotContain("hash-key-0123456789abcdef0123456789");
+	}
+
+	@Test
+	void ac_09_4_stagingRequiresARecipientAllowlist() {
+		Db db = new Db(URL, APP, SYSTEM, NONE);
+		assertThatThrownBy(() -> new AppProperties(AppEnv.STAGING, AppRole.API, db, null, ADMIN, null, NOOP_MAIL, SENDING,
+				null))
+			.hasMessageContaining("ALLOWED_RECIPIENT_DOMAINS");
+		var allowlisted = new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "accept",
+				List.of(" Example.TEST "), 262_144);
+		assertThat(new AppProperties(AppEnv.STAGING, AppRole.API, db, null, ADMIN, null, NOOP_MAIL, allowlisted, null)
+			.sending()
+			.allowedRecipientDomains()).containsExactly("example.test");
+	}
+
+	@Test
+	void ac_13_3_and_13_7_retryPolicyMustBeCoherentAndFitTheIdempotencyWindow() {
+		assertThat(local(NOOP_MAIL, SENDING, null).worker().maxAttempts()).isEqualTo(6);
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 5, List.of(60, 300, 900, 3_600, 21_600), 60)))
+			.hasMessageContaining("AC-13.3");
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 3, List.of(36_000, 36_000), 60)))
+			.hasMessageContaining("AC-13.7");
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING, new AppProperties.Worker(4, 1_000, 2, List.of(60), 10)))
+			.hasMessageContaining("LOCK_TIMEOUT_SECONDS");
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING, new AppProperties.Worker(0, 50, 2, List.of(60), 60)))
+			.hasMessageContaining("WORKER_CONCURRENCY")
+			.hasMessageContaining("WORKER_POLL_INTERVAL_MS");
 	}
 
 	@Test

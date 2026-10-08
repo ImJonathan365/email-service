@@ -23,6 +23,8 @@ dependencies {
 	implementation(libs.spring.boot.starter.flyway)
 	implementation(libs.spring.boot.starter.validation)
 	implementation(libs.spring.boot.starter.webmvc)
+	// SMTP to Mailpit for local development only (FR-15); confined to the provider package (ArchUnit).
+	implementation(libs.spring.boot.starter.mail)
 	implementation(libs.flyway.database.postgresql)
 	implementation(libs.springdoc.openapi.webmvc.ui)
 	// Template engine (ADR-0011) and the HTML parser of its linter. Nashorn only backs JavaScript

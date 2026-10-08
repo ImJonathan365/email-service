@@ -8,6 +8,11 @@ spring:
     exclude:
       # Both DataSources are defined explicitly (ADR-0008), and APP_ROLE=migrate has none.
       - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+      # The SMTP sender exists only with MAIL_PROVIDER=smtp and is built in the provider package; no
+      # startup connection test and no health check that would contact the mail server.
+      - org.springframework.boot.mail.autoconfigure.MailSenderAutoConfiguration
+      - org.springframework.boot.mail.autoconfigure.MailSenderValidatorAutoConfiguration
+      - org.springframework.boot.mail.autoconfigure.MailHealthContributorAutoConfiguration
   flyway:
     url: ${app.db.url}
     user: ${app.db.owner.username}
@@ -61,3 +66,21 @@ app:
     default-daily-quota: ${DEFAULT_DAILY_QUOTA:1000}
     default-retention-days: ${DEFAULT_RETENTION_DAYS:90}
     supported-locales: ${SUPPORTED_LOCALES:es-CR,en}
+  mail:
+    provider: ${MAIL_PROVIDER:smtp}
+    smtp-host: ${SMTP_HOST:mailpit}
+    smtp-port: ${SMTP_PORT:1025}
+    allow-smtp-in-production: ${ALLOW_SMTP_IN_PRODUCTION:false}
+    connect-timeout-ms: ${PROVIDER_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${PROVIDER_READ_TIMEOUT_MS:10000}
+  sending:
+    suppression-hash-key: ${SUPPRESSION_HASH_KEY:}
+    suppression-reject-mode: ${SUPPRESSION_REJECT_MODE:accept}
+    allowed-recipient-domains: ${ALLOWED_RECIPIENT_DOMAINS:}
+    max-request-bytes: ${MAX_REQUEST_BYTES:262144}
+  worker:
+    concurrency: ${WORKER_CONCURRENCY:4}
+    poll-interval-ms: ${WORKER_POLL_INTERVAL_MS:1000}
+    max-attempts: ${MAX_ATTEMPTS:6}
+    retry-backoff-seconds: ${RETRY_BACKOFF_SECONDS:60,300,900,3600,21600}
+    lock-timeout-seconds: ${LOCK_TIMEOUT_SECONDS:60}

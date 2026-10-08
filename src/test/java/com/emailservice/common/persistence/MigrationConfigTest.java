@@ -46,7 +46,9 @@ class MigrationConfigTest {
 	}
 
 	private static FlywayMigrationStrategy strategyFor(AppEnv env, AppRole role) {
-		return new MigrationConfig().flywayMigrationStrategy(new AppProperties(env, role, DB, null, new AppProperties.Admin(List.of("admin-secret-0123456789abcdef0123456789")), null));
+		return new MigrationConfig().flywayMigrationStrategy(new AppProperties(env, role, DB, null, new AppProperties.Admin(List.of("admin-secret-0123456789abcdef0123456789")),
+				null, new AppProperties.Mail("smtp", "mail.internal", 25, true, 3_000, 10_000),
+				new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "accept", List.of(), 262_144), null));
 	}
 
 }

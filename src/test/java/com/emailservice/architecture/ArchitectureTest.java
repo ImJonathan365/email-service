@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import com.emailservice.architecture.fixture.InjectsSystemBeanByName;
 import com.emailservice.architecture.fixture.InjectsSystemDataSource;
+import com.emailservice.architecture.fixture.UsesMailOutsideProvider;
 import com.emailservice.events.ArchFixtureAllowedSystemDataSourceUser;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -53,6 +54,14 @@ class ArchitectureTest {
 				() -> ArchitectureRules.SYSTEM_BEANS_NOT_INJECTED_BY_NAME_OUTSIDE_ALLOWED_PACKAGES.check(classes))
 			.isInstanceOf(AssertionError.class)
 			.hasMessageContaining("systemJdbcClient");
+	}
+
+	@Test
+	void providerRuleRejectsMailClassesOutsideProvider() {
+		JavaClasses classes = new ClassFileImporter().importClasses(UsesMailOutsideProvider.class);
+		assertThatThrownBy(() -> ArchitectureRules.PROVIDER_SDK_ONLY_IN_PROVIDER.check(classes))
+			.isInstanceOf(AssertionError.class)
+			.hasMessageContaining("jakarta.mail");
 	}
 
 	@Test
