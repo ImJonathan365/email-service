@@ -1,6 +1,39 @@
 {
   "components" : {
     "schemas" : {
+      "AdminView" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "sourceMessageId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sourceTenantId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sourceTenantSlug" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "Create" : {
         "properties" : {
           "allowedFromDomains" : {
@@ -159,6 +192,20 @@
             "type" : "array"
           },
           "warning" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ListResponseAdminView" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AdminView"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
             "type" : "string"
           }
         },
@@ -446,6 +493,78 @@
         } ],
         "summary" : "Revoke an API key (AC-03.4)",
         "tags" : [ "Admin: API keys" ]
+      }
+    },
+    "/admin/v1/suppressions" : {
+      "get" : {
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "reason",
+          "required" : false,
+          "schema" : {
+            "pattern" : "HARD_BOUNCE|COMPLAINT|PROVIDER",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 50,
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseAdminView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "List global suppressions with their origin (FR-18)",
+        "tags" : [ "Admin: suppressions" ]
+      }
+    },
+    "/admin/v1/suppressions/{email}" : {
+      "delete" : {
+        "operationId" : "remove",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "email",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Remove a global suppression; remove it in the provider's dashboard too (ADR-0012)",
+        "tags" : [ "Admin: suppressions" ]
       }
     },
     "/admin/v1/tenants" : {

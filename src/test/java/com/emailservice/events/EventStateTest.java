@@ -39,7 +39,7 @@ class EventStateTest extends IntegrationTest {
 	}
 
 	Sent message(String status) throws Exception {
-		HttpResponse<String> accepted = tenant.send(tenant.body(""), null);
+		HttpResponse<String> accepted = tenant.send(tenant.bodyTo(SendingTestSupport.uniqueAddress(), ""), null);
 		assertThat(accepted.statusCode()).as(accepted.body()).isEqualTo(202);
 		UUID id = UUID.fromString(SendingTestSupport.json(accepted).get("id").stringValue());
 		String emailId = UUID.randomUUID().toString();

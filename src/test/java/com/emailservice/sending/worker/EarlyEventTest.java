@@ -39,7 +39,7 @@ class EarlyEventTest extends WorkerTest {
 	}
 
 	UUID accept() throws Exception {
-		HttpResponse<String> response = a.send(a.body(""), null);
+		HttpResponse<String> response = a.send(a.bodyTo(SendingTestSupport.uniqueAddress(), ""), null);
 		assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
 		return UUID.fromString(SendingTestSupport.json(response).get("id").stringValue());
 	}

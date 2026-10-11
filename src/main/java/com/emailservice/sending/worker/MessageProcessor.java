@@ -23,7 +23,7 @@ import com.emailservice.provider.EmailSender;
 import com.emailservice.provider.OutboundEmail;
 import com.emailservice.provider.SendException;
 import com.emailservice.provider.SendResult;
-import com.emailservice.sending.SuppressionHashes;
+import com.emailservice.events.SuppressionHashes;
 import com.emailservice.templates.engine.TemplateEngine;
 import com.emailservice.templates.schema.SensitiveVariables;
 import com.emailservice.templates.schema.VariablesSchema;

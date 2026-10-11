@@ -1,4 +1,4 @@
-package com.emailservice.sending;
+package com.emailservice.events;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;

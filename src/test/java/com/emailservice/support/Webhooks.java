@@ -72,14 +72,29 @@ public final class Webhooks {
 
 	public static String emailEvent(String type, String emailId, UUID messageIdTag, String extraData,
 			Instant createdAt) {
+		return emailEvent(type, emailId, messageIdTag, extraData, createdAt, "ana@example.test");
+	}
+
+	/** {@code to} is what an orphan bounce would suppress: tests that bounce pass their own address. */
+	public static String emailEvent(String type, String emailId, UUID messageIdTag, String extraData,
+			Instant createdAt, String to) {
 		String tags = messageIdTag == null ? "{\"category\": \"reset\"}"
 				: "{\"category\": \"reset\", \"message_id\": \"" + messageIdTag + "\"}";
 		return """
 				{"type": "%s", "created_at": "%s",
 				 "data": {"created_at": "2026-10-11T10:00:00.000Z", "email_id": "%s",
 				          "message_id": "<111-222@email.example.test>", "from": "Sender <no-reply@sender.test>",
-				          "to": ["ana@example.test"], "subject": "Hola Ana", "tags": %s%s}}
-				""".formatted(type, createdAt, emailId, tags, extraData.isEmpty() ? "" : ", " + extraData);
+				          "to": ["%s"], "subject": "Hola Ana", "tags": %s%s}}
+				""".formatted(type, createdAt, emailId, to, tags, extraData.isEmpty() ? "" : ", " + extraData);
+	}
+
+	public static String suppressionEvent(String type, String email, String sourceEmailId) {
+		return """
+				{"type": "%s", "created_at": "%s",
+				 "data": {"id": "%s", "email": "%s", "origin": "bounce", "source_id": %s,
+				          "created_at": "%s"}}
+				""".formatted(type, Instant.now(), UUID.randomUUID(), email,
+				sourceEmailId == null ? "null" : "\"" + sourceEmailId + "\"", Instant.now());
 	}
 
 	/** The stored email_event row for a provider event id, as JSON, or null. */
