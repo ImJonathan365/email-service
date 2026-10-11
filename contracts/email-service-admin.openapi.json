@@ -238,6 +238,18 @@
         },
         "type" : "object"
       },
+      "Resume" : {
+        "properties" : {
+          "note" : {
+            "example" : "Domain verified again in the provider",
+            "maxLength" : 500,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "TenantView" : {
         "properties" : {
           "allowedFromDomains" : {
@@ -594,6 +606,45 @@
         } ],
         "summary" : "Issue an API key; the secret is returned only in this response (FR-03, FR-33)",
         "tags" : [ "Admin: API keys" ]
+      }
+    },
+    "/admin/v1/tenants/{slug}/resume-sending" : {
+      "post" : {
+        "operationId" : "resumeSending",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "slug",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Resume"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Lift an automatic or manual sending pause; the held queue resumes (FR-34, AC-34.4)",
+        "tags" : [ "Admin: tenants" ]
       }
     }
   },

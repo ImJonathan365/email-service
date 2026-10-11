@@ -1,5 +1,6 @@
 package com.emailservice.provider;
 
+import java.time.Duration;
 import java.util.Properties;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -8,7 +9,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 
 import com.emailservice.common.config.AppProperties;
+import com.emailservice.provider.resend.ResendEmailSender;
 import com.emailservice.provider.smtp.SmtpEmailSender;
+
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Picks the EmailSender from MAIL_PROVIDER (AC-14.2). Each implementation's infrastructure is
@@ -31,6 +35,14 @@ class ProviderConfig {
 		smtp.setProperty("mail.smtp.writetimeout", String.valueOf(mail.readTimeoutMs()));
 		mailSender.setJavaMailProperties(smtp);
 		return new SmtpEmailSender(mailSender);
+	}
+
+	@Bean
+	@ConditionalOnProperty(prefix = "app.mail", name = "provider", havingValue = "resend")
+	EmailSender resendEmailSender(AppProperties properties, JsonMapper jsonMapper) {
+		return new ResendEmailSender(properties.provider().resendApiUrl(), properties.provider().resendApiKey(),
+				Duration.ofMillis(properties.mail().connectTimeoutMs()), Duration.ofMillis(properties.mail().readTimeoutMs()),
+				jsonMapper);
 	}
 
 	@Bean

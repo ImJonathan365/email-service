@@ -49,6 +49,10 @@ abstract class WorkerTest extends IntegrationTest {
 	@BeforeEach
 	void quietQueue() throws Exception {
 		sender.reset();
+		cancelPendingMessages();
+	}
+
+	static void cancelPendingMessages() throws Exception {
 		sql("""
 				UPDATE email_message SET status = 'CANCELED', finalized_at = now(), lock_token = NULL,
 				    lock_expires_at = NULL, locked_by = NULL

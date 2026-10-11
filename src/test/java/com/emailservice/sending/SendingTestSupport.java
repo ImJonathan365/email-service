@@ -129,6 +129,17 @@ public final class SendingTestSupport {
 		}
 	}
 
+	public static JsonNode tenantRow(UUID tenantId) throws Exception {
+		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
+				PreparedStatement statement = system
+					.prepareStatement("SELECT row_to_json(t)::text FROM tenant t WHERE id = ?")) {
+			statement.setObject(1, tenantId);
+			try (ResultSet rs = statement.executeQuery()) {
+				return rs.next() ? JSON.readTree(rs.getString(1)) : null;
+			}
+		}
+	}
+
 	public static long countMessages(UUID tenantId) throws Exception {
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
 				PreparedStatement statement = system.prepareStatement("SELECT count(*) FROM email_message WHERE tenant_id = ?")) {

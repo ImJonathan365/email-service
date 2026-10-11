@@ -45,6 +45,11 @@ public class RecordingEmailSender implements EmailSender {
 	}
 
 	@Override
+	public boolean supportsIdempotency() {
+		return true;
+	}
+
+	@Override
 	public SendResult send(OutboundEmail email) throws SendException {
 		sent.add(email);
 		return behaviour.send(email);

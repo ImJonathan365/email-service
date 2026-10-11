@@ -186,19 +186,35 @@ class QueueRepository {
 	}
 
 	/**
-	 * Hands a message of a tenant that became suspended or paused after the claim back to the
-	 * queue without counting the attempt: holding is not failing (AC-02.3).
+	 * Hands a message back to the queue without counting the attempt, when nothing was wrong with
+	 * the message itself: its tenant became held after the claim (AC-02.3), or the provider setup
+	 * is broken (docs/05 §4, "Configuración"). The 23 h window still runs from the first attempt.
 	 */
-	boolean release(Claimed message) {
+	boolean release(Claimed message, String code) {
 		return jdbc.sql("""
 				UPDATE email_message
-				SET status = 'QUEUED', attempts = attempts - 1, lock_token = NULL, lock_expires_at = NULL,
-				    locked_by = NULL, updated_at = now()
+				SET status = 'QUEUED', attempts = attempts - 1, attempt_log = %s, lock_token = NULL,
+				    lock_expires_at = NULL, locked_by = NULL, updated_at = now()
 				WHERE id = :id AND status = 'SENDING' AND lock_token = :token
-				""")
+				""".formatted(APPEND_LOG))
+			.param("code", code)
 			.param("id", message.id())
 			.param("token", message.lockToken())
 			.update() == 1;
+	}
+
+	/** Pauses a tenant whose sender domain the provider rejects; false if it was already paused. */
+	boolean pauseForUnverifiedDomain(UUID tenantId) {
+		return jdbc.sql("""
+				UPDATE tenant SET sending_paused_at = now(), pause_reason = 'PROVIDER_DOMAIN', updated_at = now()
+				WHERE id = :tenantId AND sending_paused_at IS NULL
+				""")
+			.param("tenantId", tenantId)
+			.update() == 1;
+	}
+
+	JdbcClient jdbc() {
+		return jdbc;
 	}
 
 	/** After a lost lock only the history is touched, never the state (AC-12.3). */

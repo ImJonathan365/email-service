@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import com.emailservice.common.config.AppProperties;
 import com.emailservice.common.config.RoleConditions.ConditionalOnWorkerRole;
+import com.emailservice.provider.EmailSender;
 
 /**
  * The worker loop (FR-12): claims only as many messages as it has free slots (AC-12.1), sends each
@@ -38,6 +39,10 @@ class QueueWorker implements SmartLifecycle {
 
 	private final AppProperties.Worker settings;
 
+	private final CircuitBreaker breaker;
+
+	private final EmailSender sender;
+
 	private final boolean autostart;
 
 	private final String instanceId = instanceId();
@@ -50,11 +55,13 @@ class QueueWorker implements SmartLifecycle {
 
 	private volatile boolean running;
 
-	QueueWorker(QueueRepository queue, MessageProcessor processor, StuckMessageSweeper sweeper,
-			AppProperties properties, @Value("${app.worker.autostart:true}") boolean autostart) {
+	QueueWorker(QueueRepository queue, MessageProcessor processor, StuckMessageSweeper sweeper, CircuitBreaker breaker,
+			EmailSender sender, AppProperties properties, @Value("${app.worker.autostart:true}") boolean autostart) {
 		this.queue = queue;
 		this.processor = processor;
 		this.sweeper = sweeper;
+		this.breaker = breaker;
+		this.sender = sender;
 		this.settings = properties.worker();
 		this.autostart = autostart;
 		this.slots = new Semaphore(settings.concurrency());
@@ -62,6 +69,10 @@ class QueueWorker implements SmartLifecycle {
 
 	@Override
 	public void start() {
+		if (!sender.supportsIdempotency()) {
+			log.warn("Provider '{}' does not deduplicate by idempotency key: a lost response can become a "
+					+ "duplicate email (ADR-0010). Acceptable for local development only", sender.name());
+		}
 		running = true;
 		executor = Executors.newVirtualThreadPerTaskExecutor();
 		if (autostart) {
@@ -100,8 +111,10 @@ class QueueWorker implements SmartLifecycle {
 					nextSweep = System.nanoTime() + SWEEP_INTERVAL.toNanos();
 				}
 				int free = slots.drainPermits();
-				List<QueueRepository.Claimed> claimed = free == 0 ? List.of()
-						: queue.claim(free, settings.lockTimeoutSeconds(), instanceId);
+				// While the circuit breaker is open nothing is claimed, so nothing fails (AC-13.9).
+				int permitted = breaker.permittedClaims(free);
+				List<QueueRepository.Claimed> claimed = permitted == 0 ? List.of()
+						: queue.claim(permitted, settings.lockTimeoutSeconds(), instanceId);
 				slots.release(free - claimed.size());
 				for (QueueRepository.Claimed message : claimed) {
 					executor.submit(() -> {
@@ -136,8 +149,9 @@ class QueueWorker implements SmartLifecycle {
 
 	/** One synchronous round: claim up to the concurrency and process here. Tests drive the queue with it. */
 	List<QueueRepository.Claimed> runOnce() {
-		List<QueueRepository.Claimed> claimed = queue.claim(settings.concurrency(), settings.lockTimeoutSeconds(),
-				instanceId);
+		int permitted = breaker.permittedClaims(settings.concurrency());
+		List<QueueRepository.Claimed> claimed = permitted == 0 ? List.of()
+				: queue.claim(permitted, settings.lockTimeoutSeconds(), instanceId);
 		claimed.forEach(processor::process);
 		return claimed;
 	}
