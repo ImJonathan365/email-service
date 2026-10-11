@@ -15,6 +15,9 @@ public final class IntegrationTestEnvironment {
 
 	public static final String SUPPRESSION_HASH_KEY = "test-suppression-hash-key-0123456789abcdef";
 
+	/** Fictional Svix secret: tests sign their own webhooks with it (FR-16); never a real one. */
+	public static final String WEBHOOK_SECRET = "whsec_dGVzdC1vbmx5LXdlYmhvb2stc2VjcmV0LTAwMDE="; // gitleaks:allow
+
 	private IntegrationTestEnvironment() {
 	}
 
@@ -28,6 +31,7 @@ public final class IntegrationTestEnvironment {
 		registry.add("app.db.owner.password", () -> Role.OWNER.password);
 		registry.add("app.admin.api-keys", () -> ADMIN_API_KEY);
 		registry.add("app.sending.suppression-hash-key", () -> SUPPRESSION_HASH_KEY);
+		registry.add("app.provider.webhook-signing-secrets", () -> WEBHOOK_SECRET);
 		// No mail server in tests; sending tests install their own recording sender.
 		registry.add("app.mail.provider", () -> "noop");
 		// Tests drive the queue explicitly (QueueWorker.runOnce) instead of racing a background loop.

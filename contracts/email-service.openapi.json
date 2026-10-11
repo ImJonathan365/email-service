@@ -1,6 +1,25 @@
 {
   "components" : {
     "schemas" : {
+      "Create" : {
+        "properties" : {
+          "email" : {
+            "example" : "bad@example.com",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "note" : {
+            "example" : "Requested by the user",
+            "maxLength" : 500,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          }
+        },
+        "required" : [ "email" ],
+        "type" : "object"
+      },
       "CreateTemplate" : {
         "properties" : {
           "category" : {
@@ -108,6 +127,20 @@
           "data" : {
             "items" : {
               "$ref" : "#/components/schemas/TemplateSummary"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ListResponseTenantView" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TenantView"
             },
             "type" : "array"
           },
@@ -361,6 +394,30 @@
         },
         "type" : "object"
       },
+      "TenantView" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "emailMasked" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "scope" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "Version" : {
         "properties" : {
           "createdAt" : {
@@ -520,6 +577,99 @@
         } ],
         "summary" : "Send a transactional email: 202 when queued, 200 for an idempotent repeat (FR-07, FR-08)",
         "tags" : [ "Emails" ]
+      }
+    },
+    "/v1/suppressions" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "reason",
+          "required" : false,
+          "schema" : {
+            "pattern" : "HARD_BOUNCE|COMPLAINT|PROVIDER|MANUAL",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 50,
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseTenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "List own and global suppressions; global addresses are masked (AC-18.1)",
+        "tags" : [ "Suppressions" ]
+      },
+      "post" : {
+        "operationId" : "add",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Create"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Add a MANUAL suppression for this tenant; 201 when new, 200 when it already existed (AC-18.2)",
+        "tags" : [ "Suppressions" ]
+      }
+    },
+    "/v1/suppressions/{email}" : {
+      "delete" : {
+        "operationId" : "remove",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "email",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "summary" : "Remove this tenant's MANUAL suppression; a global one needs an administrator (AC-18.3)",
+        "tags" : [ "Suppressions" ]
       }
     },
     "/v1/templates" : {
@@ -837,6 +987,57 @@
         } ],
         "summary" : "Publish a draft; it becomes immutable and archives the previous one of its locale (FR-05)",
         "tags" : [ "Templates" ]
+      }
+    },
+    "/webhooks/{provider}" : {
+      "post" : {
+        "operationId" : "receive",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "svix-id",
+          "required" : true
+        }, {
+          "in" : "header",
+          "name" : "svix-timestamp",
+          "required" : true
+        }, {
+          "in" : "header",
+          "name" : "svix-signature",
+          "required" : true
+        }, {
+          "in" : "path",
+          "name" : "provider",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "format" : "byte",
+                "type" : "string"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "204" : {
+            "description" : "Processed, duplicate or orphan"
+          },
+          "400" : {
+            "description" : "Authentic but unreadable body"
+          },
+          "401" : {
+            "description" : "Invalid or missing signature, or outside the window"
+          },
+          "503" : {
+            "description" : "Database unavailable; the provider retries"
+          }
+        },
+        "summary" : "Provider events, authenticated by the provider's signature (FR-16, FR-17)",
+        "tags" : [ "Provider webhooks" ]
       }
     }
   },

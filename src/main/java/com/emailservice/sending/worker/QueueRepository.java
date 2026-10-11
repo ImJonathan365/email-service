@@ -229,9 +229,9 @@ class QueueRepository {
 	 * Reclaims SENDING messages whose lock expired (AC-11.3): back to QUEUED keeping the attempts
 	 * already counted, or FAILED once they are exhausted. Must run inside a system transaction:
 	 * the advisory lock lasts for that transaction, so only one instance sweeps at a time
-	 * (docs/05 §5). Returns the ids that became FAILED.
+	 * (docs/05 §5). Returns the messages that became FAILED.
 	 */
-	List<UUID> reclaimExpired(int maxAttempts) {
+	List<MessageKey> reclaimExpired(int maxAttempts) {
 		Boolean acquired = jdbc.sql("SELECT pg_try_advisory_xact_lock(hashtext('reclaimStuckMessages'))")
 			.query(Boolean.class)
 			.single();
@@ -247,15 +247,19 @@ class QueueRepository {
 				    lock_token = NULL, lock_expires_at = NULL, locked_by = NULL, updated_at = now(),
 				    attempt_log = %s
 				WHERE status = 'SENDING' AND lock_expires_at < now()
-				RETURNING id, status
+				RETURNING id, tenant_id, status
 				""".formatted(APPEND_LOG))
 			.param("maxAttempts", maxAttempts)
 			.param("code", "LOCK_EXPIRED")
-			.query((rs, row) -> "FAILED".equals(rs.getString("status")) ? rs.getObject("id", UUID.class) : null)
+			.query((rs, row) -> "FAILED".equals(rs.getString("status"))
+					? new MessageKey(rs.getObject("tenant_id", UUID.class), rs.getObject("id", UUID.class)) : null)
 			.list()
 			.stream()
 			.filter(Objects::nonNull)
 			.toList();
+	}
+
+	record MessageKey(UUID tenantId, UUID id) {
 	}
 
 	record StoredVariables(String variables, String variablesSchema) {

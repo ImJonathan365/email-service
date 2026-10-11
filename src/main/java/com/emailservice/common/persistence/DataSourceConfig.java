@@ -10,13 +10,13 @@ import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.emailservice.common.config.AppProperties;
-import com.emailservice.tenancy.TenantTransactionManager;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
 /**
  * Two pools (ADR-0008): the primary one runs as email_app under RLS; the system one runs as
- * email_system and is only reachable through the {@link SystemDataSource} qualifier.
+ * email_system and is only reachable through the {@link SystemDataSource} qualifier. The primary
+ * transaction manager, which binds the tenant for RLS, lives in tenancy (TenancyConfig).
  */
 @Configuration(proxyBeanMethods = false)
 public class DataSourceConfig {
@@ -35,12 +35,6 @@ public class DataSourceConfig {
 	@SystemDataSource
 	HikariDataSource systemDataSource(AppProperties properties) {
 		return pool("system", properties.db().url(), properties.db().system(), SYSTEM_POOL_SIZE);
-	}
-
-	@Bean
-	@Primary
-	PlatformTransactionManager tenantTransactionManager(DataSource dataSource) {
-		return new TenantTransactionManager(dataSource);
 	}
 
 	@Bean

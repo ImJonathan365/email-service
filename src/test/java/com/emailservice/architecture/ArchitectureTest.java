@@ -5,10 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
+import com.emailservice.architecture.fixture.CycleWithEvents;
 import com.emailservice.architecture.fixture.InjectsSystemBeanByName;
 import com.emailservice.architecture.fixture.InjectsSystemDataSource;
 import com.emailservice.architecture.fixture.UsesMailOutsideProvider;
 import com.emailservice.events.ArchFixtureAllowedSystemDataSourceUser;
+import com.emailservice.events.ArchFixtureCycle;
+import com.emailservice.events.ArchFixtureUsesProviderImplementation;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -36,7 +39,38 @@ class ArchitectureTest {
 		ArchitectureRules.PROVIDER_SDK_ONLY_IN_PROVIDER.check(PRODUCTION_CLASSES);
 	}
 
+	@Test
+	void sendingAndEventsUseTheProviderOnlyThroughItsPorts() {
+		ArchitectureRules.PROVIDER_ONLY_THROUGH_PORTS.check(PRODUCTION_CLASSES);
+	}
+
+	@Test
+	void eventsDoNotDependOnSending() {
+		ArchitectureRules.EVENTS_DO_NOT_KNOW_SENDING.check(PRODUCTION_CLASSES);
+	}
+
+	@Test
+	void firstLevelModulesHaveNoCycles() {
+		ArchitectureRules.MODULES_FREE_OF_CYCLES.check(PRODUCTION_CLASSES);
+	}
+
 	// The fixtures prove the rules detect violations instead of passing vacuously.
+
+	@Test
+	void portRuleRejectsAProviderImplementationUsedFromEvents() {
+		JavaClasses classes = new ClassFileImporter().importClasses(ArchFixtureUsesProviderImplementation.class);
+		assertThatThrownBy(() -> ArchitectureRules.PROVIDER_ONLY_THROUGH_PORTS.check(classes))
+			.isInstanceOf(AssertionError.class)
+			.hasMessageContaining("SvixWebhookVerifier");
+	}
+
+	@Test
+	void cycleRuleRejectsTwoModulesDependingOnEachOther() {
+		JavaClasses classes = new ClassFileImporter().importClasses(ArchFixtureCycle.class, CycleWithEvents.class);
+		assertThatThrownBy(() -> ArchitectureRules.MODULES_FREE_OF_CYCLES.check(classes))
+			.isInstanceOf(AssertionError.class)
+			.hasMessageContaining("Cycle");
+	}
 
 	@Test
 	void qualifierRuleRejectsInjectionOutsideAllowedPackages() {

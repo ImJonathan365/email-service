@@ -42,6 +42,18 @@ class WebConfig {
 		return registration;
 	}
 
+	/** Provider events are a few KB; anything this large is not one (FR-16). */
+	static final long WEBHOOK_REQUEST_MAX_BYTES = 256 * 1024;
+
+	@Bean
+	FilterRegistrationBean<RequestSizeFilter> webhookRequestSizeFilter(ProblemWriter problems) {
+		FilterRegistrationBean<RequestSizeFilter> registration = new FilterRegistrationBean<>(
+				new RequestSizeFilter(WEBHOOK_REQUEST_MAX_BYTES, problems));
+		registration.addUrlPatterns("/webhooks/*");
+		registration.setOrder(RequestIdFilter.ORDER + 5);
+		return registration;
+	}
+
 	@Bean
 	ClientIpResolver clientIpResolver(AppProperties properties) {
 		return new ClientIpResolver(properties.http().trustedProxyRanges());

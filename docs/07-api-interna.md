@@ -297,8 +297,17 @@ DELETE /v1/suppressions/bad@example.com
 ```
 
 - `GET` devuelve `{ email | emailMasked, scope: TENANT|GLOBAL, reason, createdAt }`; las globales van enmascaradas.
+  - **(rev. 2026-10-11)** Las propias incluyen también `note`. Las globales no muestran ni la nota ni el tenant de origen.
+  - `limit` va de 1 a 100 (por defecto 50) y `reason` es opcional. `cursor` es el `nextCursor` de la página anterior; un cursor que no emitió este servicio → `422`.
 - `POST` crea siempre `reason = MANUAL`, `scope = TENANT`.
+  - **(rev. 2026-10-11)** Responde `201` con la supresión creada, o `200` con la existente si el tenant ya tenía esa dirección suprimida: es idempotente y no cambia la nota.
+  - Una dirección inválida → `422 VALIDATION_ERROR`.
 - `DELETE` solo borra las `MANUAL` propias; sobre una global → `403 ADMIN_REQUIRED`.
+  - **(rev. 2026-10-11)** `204` si se borró (queda en auditoría como `SUPPRESSION_DELETED`, sin la dirección).
+  - `404 RESOURCE_NOT_FOUND` si el tenant no tiene esa supresión y tampoco existe una global.
+- **(rev. 2026-10-11)** Administración de las globales:
+  - `GET /admin/v1/suppressions?reason&limit&cursor` las lista con la dirección completa y el origen (`sourceTenantSlug`, `sourceMessageId`);
+  - `DELETE /admin/v1/suppressions/{email}` borra la global (`204`, auditado; `404` si no existe). Hay que retirarla también en el panel del proveedor; si no, el proveedor la sigue saltando y la vuelve a informar.
 
 ## 9. Webhooks entrantes (rev. 2026-10)
 
@@ -312,6 +321,10 @@ svix-signature: v1,k8s9…
 
 - La firma se verifica sobre el **cuerpo crudo**, antes de parsear el JSON, con el secreto del endpoint (`MAIL_WEBHOOK_SIGNING_SECRET`), con una ventana de ±5 min sobre `svix-timestamp`. `svix-id` se guarda como `provider_event_id` para deduplicar.
 - Respuestas: `204` (procesado, duplicado o huérfano), `401` (firma inválida o fuera de ventana), `400` (cuerpo ilegible tras verificar la firma), `503` (BD no disponible; el proveedor reintentará). **Nunca 5xx** por un evento que no se puede correlacionar.
+- **(rev. 2026-10-11)** Otros detalles:
+  - un proveedor desconocido, o Resend sin `MAIL_WEBHOOK_SIGNING_SECRET` configurado (desarrollo local), → `404`;
+  - un cuerpo de más de 256 KB → `413`;
+  - el `401` no dice qué falló; el motivo va solo a la métrica `email_webhook_rejected_total{reason}` y a un WARN por IP y minuto.
 - El formato exacto depende del proveedor: el puerto `WebhookVerifier` (módulo `provider`) tiene una implementación por proveedor; el módulo `events` la consume.
 - Mapeo de eventos: `02` §2.1.
 

@@ -105,6 +105,16 @@ public final class SendingTestSupport {
 				+ "\"variables\": " + VARIABLES + (extraFields.isBlank() ? "" : ", " + extraFields) + "}";
 	}
 
+	/** A send to the given address; tests that bounce or complain use their own, never a shared one. */
+	public String bodyTo(String address, String extraFields) {
+		return "{\"templateKey\": \"" + templateKey + "\", \"to\": {\"email\": \"" + address + "\"}, "
+				+ "\"variables\": " + VARIABLES + (extraFields.isBlank() ? "" : ", " + extraFields) + "}";
+	}
+
+	public static String uniqueAddress() {
+		return "r-" + UUID.randomUUID().toString().substring(0, 12) + "@example.test";
+	}
+
 	public HttpResponse<String> send(String body, String idempotencyKey) throws Exception {
 		TestHttp.Request request = http.post("/v1/emails").header("Authorization", product.bearer()).json(body);
 		if (idempotencyKey != null) {

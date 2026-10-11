@@ -2,6 +2,40 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-11 — H6: eventos y supresiones
+
+- **Hecho:**
+  - **`POST /webhooks/{provider}`** (FR-16):
+    - `WebhookVerifier` en `provider`, con `SvixWebhookVerifier` propio: cuerpo crudo, tiempo constante, uno o dos secretos, ventana ±5 min, verificado con el ejemplo publicado por Svix;
+    - respuestas `204`, `401`, `400`, `404`, `413` y `503` solo ante un error de BD;
+    - dedupe por `svix-id`;
+    - los rechazos se cuentan y se registran como mucho una vez por IP y minuto.
+  - **Eventos** (FR-17):
+    - mapeo completo de docs/02 §2.1 y estados por precedencia, incluidos `DELIVERED → BOUNCED/COMPLAINED`, `email.failed` y `email.suppressed`;
+    - payload minimizado por lista blanca;
+    - huérfanos guardados con `204`.
+  - **Supresiones** (FR-10, ADR-0012):
+    - globales desde rebotes, quejas y `email.suppressed`, en la transacción del evento e independientes del estado;
+    - espejo de `suppression.added/removed`.
+  - **API de supresiones** (FR-18) y `GET/DELETE /admin/v1/suppressions`, con cursor opaco.
+  - **ArchUnit:** sin ciclos entre módulos de primer nivel; `events` no depende de `sending`; `sending` y `events` solo usan los puertos de `provider`.
+  - **README:** registro del endpoint en Resend, rotación del secreto y prueba temporal con un túnel que solo expone `/webhooks/*`.
+- **Decisiones del owner (2026-10-11):**
+  - **Eventos que llegan con el mensaje en `QUEUED`/`SENDING`:** se guardan sin tocar el estado y el worker los aplica tras su cierre a `SENT`.
+  - **Mensaje que nosotros cerramos en `FAILED` y el proveedor sí procesó:** sigue `FAILED`, con WARN y `email_event_after_failure_total`.
+  - **Rebote o queja con `cc`/`bcc`:** no se suprime el `to`; se aplica el estado y la supresión llega por `suppression.added`.
+  - **Correlación:** primero la etiqueta `message_id`, después `data.email_id`; si apuntan a mensajes distintos, el evento queda huérfano.
+  - **`POST` repetido → `200`; `DELETE` inexistente → `404`.**
+  - **`EmailAddresses` y `SuppressionHashes` pasan a `events`.**
+- **Otros cambios:**
+  - el gestor de transacciones de tenant pasa de `common` a `tenancy`, para romper un ciclo que ya existía;
+  - el contenedor de test admite 300 conexiones;
+  - `.gitignore` ignora `.env.*` (salvo `.env.example`).
+- **Pendiente:**
+  - purga de huérfanos a los 30 días (tarea de mantenimiento);
+  - historial de eventos en `GET /v1/emails/{id}` (H7);
+  - registrar el endpoint real cuando exista la cuenta de staging (owner).
+
 ## 2026-10-10 — H5: proveedor real (Resend)
 
 - **Hecho:**

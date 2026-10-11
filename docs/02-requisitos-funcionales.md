@@ -86,6 +86,9 @@ Reglas:
 - `opened` y `clicked` **no** son estados: se registran como eventos y como marcas de tiempo (`first_opened_at`, `first_clicked_at`).
 - Un evento que no hace avanzar el estado (llega tarde o desordenado) **se guarda igualmente** y **sus efectos secundarios se aplican igual** (p. ej., crear la supresión ante una queja). Cambiar el estado y crear la supresión son efectos independientes.
 - Un tenant suspendido o en pausa (FR-02, FR-34) **no** cambia el estado de sus mensajes: los `QUEUED` quedan retenidos.
+- **(rev. 2026-10-11, owner)** `QUEUED` y `SENDING` pertenecen al worker: un evento que llega antes de que el worker cierre el mensaje (por ejemplo, tras una respuesta perdida) se guarda **sin** cambiar el estado. El worker lo aplica justo después de su propio cierre a `SENT`, así que el *fencing* por `lock_token` no cambia. Ejemplo: llega `email.delivered` con el mensaje en `SENDING`; al cerrar, el mensaje queda `DELIVERED` con `delivered_at`.
+- **(rev. 2026-10-11, owner)** Si el worker cerró el mensaje en `FAILED` (p. ej. `RETRY_WINDOW_EXCEEDED`) y el proveedor informa que sí lo procesó (`sent`, `delivered`, `bounced`…), el estado **no** cambia. Se registra un WARN y la métrica `email_event_after_failure_total`, porque es el caso raro de "el proveedor sí lo envió".
+- **(rev. 2026-10-11)** Correlación de un evento: primero por la etiqueta `message_id` (nuestro UUID, presente aunque aún no exista `provider_message_id`), después por el id del proveedor (`data.email_id`). Si ambos existen y apuntan a mensajes distintos, el evento se guarda como huérfano con un WARN.
 
 ### 2.1 Mapeo de eventos del proveedor (Resend) (rev. 2026-10)
 
@@ -212,6 +215,9 @@ Requiere el ámbito `templates:write` (FR-33).
   - Alternativa configurable `SUPPRESSION_REJECT_MODE=reject` → `422 RECIPIENT_SUPPRESSED`.
 - **AC-10.2** — **(rev. 2026-10)** Alcance de la supresión (ADR-0012): `HARD_BOUNCE`, `COMPLAINT` y `PROVIDER` son **globales** (aplican a todos los tenants); `MANUAL` es **por tenant**. *Dado* una dirección suprimida globalmente por un rebote duro de un tenant A, *cuando* el tenant B envía a esa dirección, *entonces* también queda `FAILED`/`SUPPRESSED`.
 - **AC-10.3** — Un rebote duro (`email.bounced`) o una queja (`email.complained`) recibidos por webhook crean automáticamente la supresión, **aunque el evento no cambie el estado del mensaje** (§2).
+  - **(rev. 2026-10-11, owner)** El evento del proveedor no dice qué destinatario rebotó o se quejó. Si el mensaje tenía `cc` o `bcc`, **no** se suprime el `to`, porque podría ser la dirección principal del usuario. El estado del mensaje sí pasa a `BOUNCED`/`COMPLAINED`, porque es un hecho del mensaje.
+  - En ese caso la supresión llega con el `suppression.added` del proveedor, que nombra la dirección exacta: fila espejo `PROVIDER`, global.
+  - Sin copias, se suprime el `to`. Un evento huérfano suprime las direcciones que informa el proveedor (`data.to`).
 - **AC-10.4** — **(rev. 2026-10)** `email.delivery_delayed` (problema temporal) **no** suprime: solo registra el evento `DELIVERY_DELAYED`.
 - **AC-10.5** — La comprobación es insensible a mayúsculas/minúsculas en el dominio y en la parte local (decisión simple y explícita).
 - **AC-10.6** — **(rev. 2026-10)** El worker vuelve a comprobar la supresión justo antes de llamar al proveedor (AC-12.2), de modo que una supresión creada entre la aceptación y el envío también se respeta.
