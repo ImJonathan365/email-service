@@ -31,7 +31,7 @@ class AppPropertiesTest {
 			"accept", List.of(), 262_144);
 
 	static AppProperties props(AppEnv env, AppRole role, Db db) {
-		return new AppProperties(env, role, db, null, ADMIN, null, mailFor(env), SENDING, null);
+		return new AppProperties(env, role, db, null, ADMIN, null, mailFor(env), SENDING, null, null);
 	}
 
 	/** Production refuses noop and plain smtp, so production cases use smtp with the explicit override. */
@@ -42,7 +42,7 @@ class AppPropertiesTest {
 
 	static AppProperties apiWith(Http http, Admin admin, Tenancy tenancy) {
 		return new AppProperties(AppEnv.PRODUCTION, AppRole.API, new Db(URL, APP, SYSTEM, NONE), http, admin, tenancy,
-				mailFor(AppEnv.PRODUCTION), SENDING, null);
+				mailFor(AppEnv.PRODUCTION), SENDING, null, null);
 	}
 
 	@Test
@@ -59,7 +59,7 @@ class AppPropertiesTest {
 	@Test
 	void migrateRoleRequiresOnlyOwnerCredentials() {
 		assertThatNoException().isThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.MIGRATE,
-				new Db(URL, NONE, NONE, OWNER), null, null, null, null, null, null));
+				new Db(URL, NONE, NONE, OWNER), null, null, null, null, null, null, null));
 		assertThatThrownBy(() -> props(AppEnv.PRODUCTION, AppRole.MIGRATE, new Db(URL, APP, SYSTEM, NONE)))
 			.hasMessageContaining("DB_OWNER_USER")
 			.hasMessageContaining("DB_OWNER_PASSWORD");
@@ -90,11 +90,11 @@ class AppPropertiesTest {
 	void adminKeysAreRequiredOnlyWhereTheApiIsServed() {
 		assertThatThrownBy(() -> apiWith(null, null, null)).hasMessageContaining("ADMIN_API_KEYS is required");
 		assertThatThrownBy(() -> new AppProperties(AppEnv.LOCAL, AppRole.ALL, new Db(URL, APP, SYSTEM, OWNER), null,
-				null, null, NOOP_MAIL, SENDING, null))
+				null, null, NOOP_MAIL, SENDING, null, null))
 			.hasMessageContaining("ADMIN_API_KEYS");
 		assertThatNoException().isThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER,
 				new Db(URL, APP, SYSTEM, NONE), null, null, null, mailFor(AppEnv.PRODUCTION), SENDING,
-				null));
+				null, null));
 	}
 
 	@Test
@@ -141,23 +141,53 @@ class AppPropertiesTest {
 
 	static AppProperties local(AppProperties.Mail mail, AppProperties.Sending sending, AppProperties.Worker worker) {
 		return new AppProperties(AppEnv.LOCAL, AppRole.ALL, new Db(URL, APP, SYSTEM, OWNER), null, ADMIN, null, mail,
-				sending, worker);
+				sending, worker, null);
 	}
 
 	@Test
 	void ac_15_3_smtpAndNoopAreRefusedInProductionUnlessExplicitlyAllowed() {
 		Db db = new Db(URL, APP, SYSTEM, NONE);
 		assertThatThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null,
-				new AppProperties.Mail("smtp", "mail.internal", 25, false, 3_000, 10_000), SENDING, null))
+				new AppProperties.Mail("smtp", "mail.internal", 25, false, 3_000, 10_000), SENDING, null, null))
 			.hasMessageContaining("ALLOW_SMTP_IN_PRODUCTION");
 		assertThatThrownBy(() -> new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null, NOOP_MAIL,
-				SENDING, null))
+				SENDING, null, null))
 			.hasMessageContaining("MAIL_PROVIDER=noop");
 		assertThatThrownBy(() -> local(new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000), SENDING, null))
-			.hasMessageContaining("H5");
+			.hasMessageContaining("RESEND_API_KEY");
 		assertThatThrownBy(() -> local(new AppProperties.Mail("smtp", " ", 0, false, 3_000, 10_000), SENDING, null))
 			.hasMessageContaining("SMTP_HOST");
 		assertThat(local(null, SENDING, null).mail().provider()).isEqualTo("smtp");
+	}
+
+	@Test
+	void resendNeedsItsKeyAndAnHttpsEndpointOutsideLocal() {
+		AppProperties.Mail resend = new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000);
+		Db db = new Db(URL, APP, SYSTEM, NONE);
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider(" ", null, 8, 5, 60)))
+			.hasMessageContaining("RESEND_API_KEY");
+		assertThatThrownBy(
+				() -> resend(AppEnv.STAGING, new AppProperties.Provider("re_secret", "http://resend.test", 8, 5, 60)))
+			.hasMessageContaining("RESEND_API_URL")
+			.message()
+			.doesNotContain("re_secret");
+		assertThat(resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", "http://localhost:8089", 8, 5, 60))
+			.provider()
+			.resendApiUrl()).isEqualTo("http://localhost:8089");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 0, 5, 60)))
+			.hasMessageContaining("WORKER_PROVIDER_RPS");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 0, 0)))
+			.hasMessageContaining("CIRCUIT_BREAKER_FAILURES")
+			.hasMessageContaining("CIRCUIT_BREAKER_OPEN_SECONDS");
+		AppProperties production = new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null, resend,
+				SENDING, null, new AppProperties.Provider("re_secret", null, 8, 5, 60));
+		assertThat(production.provider().resendApiUrl()).isEqualTo("https://api.resend.com");
+		assertThat(production.toString()).doesNotContain("re_secret");
+	}
+
+	private static AppProperties resend(AppEnv env, AppProperties.Provider provider) {
+		return new AppProperties(env, AppRole.ALL, new Db(URL, APP, SYSTEM, OWNER), null, ADMIN, null,
+				new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000), SENDING, null, provider);
 	}
 
 	@Test
@@ -176,11 +206,11 @@ class AppPropertiesTest {
 	void ac_09_4_stagingRequiresARecipientAllowlist() {
 		Db db = new Db(URL, APP, SYSTEM, NONE);
 		assertThatThrownBy(() -> new AppProperties(AppEnv.STAGING, AppRole.API, db, null, ADMIN, null, NOOP_MAIL, SENDING,
-				null))
+				null, null))
 			.hasMessageContaining("ALLOWED_RECIPIENT_DOMAINS");
 		var allowlisted = new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "accept",
 				List.of(" Example.TEST "), 262_144);
-		assertThat(new AppProperties(AppEnv.STAGING, AppRole.API, db, null, ADMIN, null, NOOP_MAIL, allowlisted, null)
+		assertThat(new AppProperties(AppEnv.STAGING, AppRole.API, db, null, ADMIN, null, NOOP_MAIL, allowlisted, null, null)
 			.sending()
 			.allowedRecipientDomains()).containsExactly("example.test");
 	}

@@ -110,7 +110,9 @@ Resumen (detalle en `08-seguridad.md`):
 
 ### NFR-09 — Operabilidad (Must)
 
-- `cp .env.example .env && docker compose up --build` levanta app + PostgreSQL + Mailpit, con migraciones aplicadas automáticamente, en ≤ 90 s.
+- `cp .env.example .env && docker compose up --build` levanta app + PostgreSQL + Mailpit, con migraciones aplicadas automáticamente, en **≤ 90 s con la caché de capas o de Gradle disponible; ≤ 150 s en un clon totalmente en frío** (dominado por la descarga de dependencias). **(rev. 2026-10-10)** Medido en H4: 13 s con la caché de capas de Docker; ≈ 100 s totalmente en frío (89 s de build, casi todo descargas de Gradle, + 11 s de arranque con un volumen nuevo). El `Dockerfile` usa un *cache mount* de BuildKit para `~/.gradle`, que sobrevive aunque falte la caché de capas y no forma parte de ninguna capa de la imagen. Verificado el 2026-10-10:
+  - con la caché de capas invalidada (cambio en `build.gradle.kts`) y el *cache mount* disponible, el build tarda 39 s; el paso de dependencias baja de 568 s a 19,5 s;
+  - `docker build --no-cache` descarta también el *cache mount*, así que mide el caso totalmente en frío. Ese día, con una red lenta, tardó 717–1150 s: el límite de 150 s supone una descarga de dependencias normal (≈ 70 s, como en H4).
 - Despliegue en producción: **una imagen** y roles por variable de entorno (`APP_ROLE=api|worker|all|migrate`).
 - **(rev. 2026-10)** Las migraciones Flyway se ejecutan como paso previo del despliegue con `APP_ROLE=migrate` y el rol de BD `email_owner`; las instancias `api`/`worker` corren con roles sin privilegios DDL y **no** migran al arrancar en producción. En local (`APP_ROLE=all`, `APP_ENV=local`) se migra al arrancar por comodidad.
 - Las migraciones son compatibles hacia atrás (una versión nueva de la app debe convivir con la anterior durante un despliegue *rolling*).

@@ -13,7 +13,14 @@ public class SendException extends Exception {
 		/** Retry with backoff: timeouts, network errors, 429, 5xx. */
 		TRANSIENT,
 		/** Never retry: invalid recipient, rejected content, other 4xx. */
-		PERMANENT
+		PERMANENT,
+		/**
+		 * The service's own provider setup is broken (revoked key, wrong endpoint): no message can
+		 * be sent until someone fixes it, so attempts are not counted and the breaker opens.
+		 */
+		CONFIGURATION,
+		/** One tenant's sender domain is not verified: that tenant is paused, the others go on. */
+		TENANT_CONFIGURATION
 
 	}
 
@@ -23,11 +30,19 @@ public class SendException extends Exception {
 
 	private final Duration retryAfter;
 
+	private final String providerError;
+
 	public SendException(Kind kind, String code, String detail, Duration retryAfter, Throwable cause) {
+		this(kind, code, detail, retryAfter, null, cause);
+	}
+
+	public SendException(Kind kind, String code, String detail, Duration retryAfter, String providerError,
+			Throwable cause) {
 		super(detail, cause);
 		this.kind = kind;
 		this.code = code;
 		this.retryAfter = retryAfter;
+		this.providerError = providerError;
 	}
 
 	public static SendException transientFailure(String code, String detail, Throwable cause) {
@@ -49,6 +64,11 @@ public class SendException extends Exception {
 	/** A provider-imposed wait (429 Retry-After) that replaces the computed backoff (AC-13.5). */
 	public Duration retryAfter() {
 		return retryAfter;
+	}
+
+	/** The provider's own error name (e.g. suspended_api_key), for metrics and alerts; may be null. */
+	public String providerError() {
+		return providerError;
 	}
 
 }

@@ -115,6 +115,14 @@ class TenantRepository {
 			.single();
 	}
 
+	TenantView resumeSending(UUID id) {
+		return jdbc.sql("UPDATE tenant SET sending_paused_at = NULL, pause_reason = NULL, updated_at = now() "
+				+ "WHERE id = :id RETURNING " + COLUMNS)
+			.param("id", id)
+			.query(TenantRepository::map)
+			.single();
+	}
+
 	private static String[] toArray(List<String> values) {
 		return values == null ? null : values.toArray(String[]::new);
 	}

@@ -43,6 +43,11 @@ public class SmtpEmailSender implements EmailSender {
 	}
 
 	@Override
+	public boolean supportsIdempotency() {
+		return false;
+	}
+
+	@Override
 	public SendResult send(OutboundEmail email) throws SendException {
 		MimeMessage message;
 		try {

@@ -4,7 +4,7 @@ Microservicio interno de correo **transaccional** para PipeMend, Colmena, Chinam
 
 La fuente de verdad es [`docs/`](docs/README.md). Reglas para asistentes de IA: [`AGENTS.md`](AGENTS.md).
 
-> Estado: hitos H1 (esqueleto), H2 (tenancy), H3 (plantillas) y H4 (envío de extremo a extremo con SMTP hacia Mailpit). El proveedor real (Resend) llega en H5 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
+> Estado: hitos H1 (esqueleto), H2 (tenancy), H3 (plantillas), H4 (envío de extremo a extremo con SMTP hacia Mailpit) y H5 (proveedor real: Resend, con circuit breaker y límite de tasa). Los webhooks del proveedor llegan en H6 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
 
 ## Arranque local
 
@@ -26,6 +26,64 @@ docker compose up --build       # app (APP_ROLE=all) + PostgreSQL 18 con 3 roles
 | http://localhost:8025 | Mailpit (SMTP de desarrollo; no entrega nada fuera) |
 
 Tests: `./gradlew build` (necesita Docker: Testcontainers con los mismos roles y RLS que producción).
+
+## Envío real desde staging (Resend)
+
+En local se envía siempre por SMTP a Mailpit. Resend se usa a partir de staging (ADR-0016). La cuenta la prepara el owner; el servicio solo necesita las variables.
+
+1. **Equipo de Resend para staging,** separado del de producción. Así una key o un dominio de staging nunca afectan a la reputación de producción.
+2. **Dominio remitente:** en *Domains → Add domain*, un subdominio propio (p. ej. `mail-staging.<dominio>`). Publica en el DNS los registros que muestra Resend:
+   - **SPF:** el `TXT` y el `MX` del subdominio de rebotes (`send.…`);
+   - **DKIM:** el `TXT` `resend._domainkey…`;
+   - **DMARC:** Resend no lo crea. Añade `_dmarc.<subdominio>` `TXT "v=DMARC1; p=none; rua=mailto:<buzón>"` y endurécelo (`quarantine` / `reject`) cuando los informes estén limpios.
+
+   Espera a que el dominio aparezca como **Verified**.
+3. **API key:** en *API Keys → Create*, con permiso **Sending access** y limitada a ese dominio. Se muestra una sola vez: guárdala directamente en el gestor de secretos de staging.
+4. **Variables del despliegue de staging** (gestor de secretos, nunca en el repositorio):
+
+   | Variable | Valor |
+   |---|---|
+   | `APP_ENV` | `staging` |
+   | `MAIL_PROVIDER` | `resend` |
+   | `RESEND_API_KEY` | la key del paso 3 (secreto) |
+   | `ALLOWED_RECIPIENT_DOMAINS` | dominios de destino permitidos en staging (obligatoria) |
+   | `WORKER_PROVIDER_RPS` | límite de peticiones por segundo de la cuenta de Resend dividido entre el número de instancias de worker |
+   | `CIRCUIT_BREAKER_FAILURES` / `CIRCUIT_BREAKER_OPEN_SECONDS` | `5` / `60` (por defecto) |
+
+   `RESEND_API_URL` solo se cambia para pruebas contra un stub, y fuera de `local` debe ser `https`.
+5. **Tenant:** su `fromEmail` debe usar el dominio verificado, que también va en `allowedFromDomains`:
+   ```bash
+   curl -X PATCH "$BASE/admin/v1/tenants/demo" -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+     -d '{"fromEmail": "no-reply@mail-staging.<dominio>", "allowedFromDomains": ["mail-staging.<dominio>"]}'
+   ```
+
+**Qué pasa si algo está mal configurado** (docs/05 §4):
+- **Key revocada o sin permiso** (`401`, `403` de la key, `404`/`405`):
+  - el circuit breaker se abre al primer error y nadie consume intentos;
+  - suben el log de error y `email_provider_config_error_total{error}`;
+  - tras corregir la key, el siguiente sondeo (60 s) reanuda el envío;
+  - los mensajes caducan a las 23 h de su primer intento (`RETRY_WINDOW_EXCEEDED`).
+- **Dominio no verificado** (`403 validation_error`):
+  - solo ese tenant queda en pausa (`pause_reason = PROVIDER_DOMAIN`, auditado);
+  - sus mensajes siguen `QUEUED` y la API responde `403 TENANT_SENDING_PAUSED`;
+  - tras verificar el dominio, se reanuda con:
+  ```bash
+  curl -X POST "$BASE/admin/v1/tenants/demo/resume-sending" -H "X-Admin-Key: $ADMIN_KEY" \
+    -H 'Content-Type: application/json' -d '{"note": "dominio verificado en Resend"}'
+  ```
+
+**Prueba manual (opcional).** Envía un correo real a un buzón tuyo, dentro de `ALLOWED_RECIPIENT_DOMAINS`:
+```bash
+curl -X POST "$BASE/v1/emails" -H "Authorization: Bearer $PRODUCT_KEY" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"templateKey": "<plantilla publicada>", "to": {"email": "<tu buzón>"}, "variables": {...}}'
+```
+Comprueba lo siguiente:
+- la respuesta es `202` con el `id` del mensaje;
+- en *Emails* de Resend aparece el envío con la etiqueta `message_id=<id>`;
+- en la base, el mensaje pasa a `SENT` con `provider_message_id`.
+
+Los tests nunca llaman a Resend: usan WireMock en local.
 
 ## Plantillas como código
 
