@@ -41,7 +41,7 @@ Swagger UI: `/swagger-ui.html` · OpenAPI: `/v3/api-docs/public` y `/v3/api-docs
 | `POST` | `/admin/v1/tenants` | Crear tenant | admin | FR-02 |
 | `GET` | `/admin/v1/tenants` | Listar tenants | admin | FR-02 |
 | `PATCH` | `/admin/v1/tenants/{slug}` | Actualizar límites/estado/hosts | admin | FR-02 |
-| `POST` | `/admin/v1/tenants/{slug}/resume-sending` | Levantar una pausa por anomalía (rev. 2026-10) | admin | FR-34 |
+| `POST` | `/admin/v1/tenants/{slug}/resume-sending` | Levantar una pausa: anomalía, manual o dominio no verificado en el proveedor (rev. 2026-10-10). Idempotente: sin pausa no cambia nada | admin | FR-34 |
 | `POST` | `/admin/v1/tenants/{slug}/api-keys` | Emitir API key | admin | FR-03, FR-33 |
 | `GET` | `/admin/v1/tenants/{slug}/api-keys` | Listar keys (sin secretos) | admin | FR-03 |
 | `DELETE` | `/admin/v1/api-keys/{id}` | Revocar key | admin | FR-03 |

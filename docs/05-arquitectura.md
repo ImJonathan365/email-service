@@ -118,8 +118,10 @@ Reglas de dependencia (verificables con ArchUnit):
 
 | Clase | Ejemplos | Acción |
 |---|---|---|
-| **Transitorio** | timeout, error de red, `429`, `500`–`504` del proveedor, lock vencido | `QUEUED` con backoff (`attempts` ya se incrementó al tomar) |
-| **Permanente** | `400`/`422` del proveedor, dirección inválida, dominio no verificado, contenido rechazado, `409` de idempotencia | `FAILED` inmediato con `failure_code` |
+| **Transitorio** | timeout, error de red, `429`, `500`–`504` del proveedor, `409` `concurrent_idempotent_requests` / `resource_locked` (la misma clave sigue en curso), lock vencido | `QUEUED` con backoff (`attempts` ya se incrementó al tomar) |
+| **Permanente** | `400`/`422` del proveedor, dirección inválida, contenido rechazado, `409` `invalid_idempotent_request` (misma clave, cuerpo distinto) | `FAILED` inmediato con `failure_code` |
+| **Configuración** (rev. 2026-10-10) | `401`, `403` de la API key (`restricted_api_key`, `suspended_api_key`, `invalid_permission`), `404`/`405`: falla nuestra cuenta, no el mensaje | Abre el circuit breaker de inmediato; el mensaje vuelve a `QUEUED` **sin** consumir intento (`PROVIDER_CONFIGURATION` en `attempt_log`); log de error y `email_provider_config_error_total{error}` (alerta) |
+| **Configuración del tenant** (rev. 2026-10-10) | `403` `validation_error`: el dominio remitente del tenant no está verificado | Pausa **solo ese tenant** (`pause_reason = PROVIDER_DOMAIN`, auditoría `TENANT_PAUSED`, misma métrica); el mensaje vuelve a `QUEUED` sin consumir intento. Los demás tenants siguen enviando. Se levanta con `POST /admin/v1/tenants/{slug}/resume-sending` |
 | **Local** | Error de render | `FAILED` inmediato (`RENDER_ERROR`), sin llamar al proveedor |
 | **Bloqueante** | Destinatario suprimido | `FAILED` (`SUPPRESSED`) |
 | **Retención** (rev. 2026-10) | Tenant suspendido o en pausa | **No** se toma; sigue `QUEUED` hasta reactivarse |
@@ -136,7 +138,22 @@ Reglas de dependencia (verificables con ArchUnit):
   - `email_lost_lock_total`;
   - `email_locale_fallback_total`;
   - `email_requests_without_idempotency_total`.
-- **Pendiente para H5:** el circuit breaker y `WORKER_PROVIDER_RPS`, junto con Resend.
+
+**(rev. 2026-10-10) Comportamiento implementado en H5 (Resend):**
+- **`ResendEmailSender`:** `POST /emails` con el cliente HTTP del JDK. Cada intento lleva `Idempotency-Key = message.id` y la etiqueta `message_id=<uuid>`; las etiquetas del producto van como `{name: tag, value: "true"}`. Del error del proveedor solo se guarda su `name` (p. ej. `Resend 422 validation_error`), nunca el mensaje, que puede repetir direcciones.
+- **`supportsIdempotency()`:** el puerto declara si el proveedor deduplica por clave. Si no (SMTP), el worker lo advierte al arrancar: una respuesta perdida puede duplicar el correo.
+- **`WORKER_PROVIDER_RPS`:** cada instancia espacia sus llamadas 1/RPS sin ráfaga, de modo que ninguna ventana de un segundo supera RPS. Las instancias no se coordinan: la suma se ajusta por configuración (NFR-21).
+- **Circuit breaker (AC-13.9),** código propio, sin Resilience4j:
+  - se abre tras `CIRCUIT_BREAKER_FAILURES` fallos transitorios seguidos, o de inmediato con un error de configuración;
+  - abierto, el worker no toma mensajes, y los ya tomados en la misma tanda vuelven a `QUEUED` sin intento (`CIRCUIT_OPEN`);
+  - tras `CIRCUIT_BREAKER_OPEN_SECONDS` deja pasar **un** envío de prueba: si va bien se cierra, si falla se abre otro periodo;
+  - gauge `email_circuit_breaker_open`.
+- **Ventana de 23 h:** los errores de configuración no consumen intentos, pero la ventana se cuenta desde `first_attempt_at`. Si la cuenta sigue rota más de 23 h, el mensaje termina en `FAILED` (`RETRY_WINDOW_EXCEEDED`) aunque `attempts` no haya subido.
+- **Métricas nuevas:**
+  - `email_provider_config_error_total{error}` (alerta);
+  - `email_provider_idempotency_conflict_total` (indica un render no determinista, AC-12.7);
+  - `email_circuit_breaker_open`.
+- **Webhooks de Resend:** no se implementan aquí, llegan en H6.
 
 Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_ATTEMPTS` = 6 (5 esperas + 1). Ventana total < 23 h, validada al arrancar (AC-13.7). Un `429` con `Retry-After` respeta ese valor.
 
@@ -170,8 +187,9 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `DB_OWNER_USER` / `DB_OWNER_PASSWORD` | — | Rol `email_owner`, solo con `APP_ROLE=migrate` |
 | `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default). **(rev. 2026-10-06)** Solo se exige con `APP_ROLE=api\|all` (el worker y `migrate` nunca la reciben); cada una de ≥ 32 caracteres |
 | `TRUSTED_PROXIES` | *(vacío)* | CIDR de proxies cuya `X-Forwarded-For` se acepta |
-| `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `resend` llega en H5; `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
-| `RESEND_API_KEY` | — | Solo si `MAIL_PROVIDER=resend` |
+| `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
+| `RESEND_API_KEY` | — | Secreto; **obligatoria** con `MAIL_PROVIDER=resend` (rev. 2026-10-10). Nunca se registra en logs |
+| `RESEND_API_URL` | `https://api.resend.com` | (rev. 2026-10-10) Base de la API; debe ser `https` salvo con `APP_ENV=local` (pruebas contra un stub) |
 | `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación |
 | `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp |
 | `SMTP_HOST` / `SMTP_PORT` | `mailpit` / `1025` | Modo desarrollo |
@@ -183,7 +201,7 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `MAX_ATTEMPTS` | `6` | = nº de esperas + 1 (validado) |
 | `RETRY_BACKOFF_SECONDS` | `60,300,900,3600,21600` | Backoff (ventana total < 23 h, validado) |
 | `LOCK_TIMEOUT_SECONDS` | `60` | Expiración del lock por mensaje |
-| `CIRCUIT_BREAKER_FAILURES` / `CIRCUIT_BREAKER_OPEN_SECONDS` | `5` / `60` | Circuit breaker |
+| `CIRCUIT_BREAKER_FAILURES` / `CIRCUIT_BREAKER_OPEN_SECONDS` | `5` / `60` | Circuit breaker (AC-13.9); ambos ≥ 1 |
 | `DEFAULT_RATE_LIMIT_PER_MINUTE` | `60` | Por tenant |
 | `DEFAULT_DAILY_QUOTA` | `1000` | Por tenant (fijar ~3× el volumen esperado) |
 | `DEFAULT_RETENTION_DAYS` | `90` | Por tenant |

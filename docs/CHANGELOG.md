@@ -2,6 +2,48 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-10 — H5: proveedor real (Resend)
+
+- **Hecho:**
+  - **`ResendEmailSender`** (cliente HTTP del JDK, sin SDK):
+    - `Idempotency-Key = message.id` en cada intento;
+    - etiquetas `message_id=<uuid>` y `{name: tag, value: "true"}`;
+    - del error solo se guarda su `name`;
+    - `RESEND_API_KEY` obligatoria con `MAIL_PROVIDER=resend`;
+    - `RESEND_API_URL` debe ser `https` fuera de `local`.
+  - **Clasificación** (docs/05 §4), con un test por código:
+    - `2xx` → `SENT`;
+    - `400`/`422` → permanente;
+    - `409 invalid_idempotent_request` → `PROVIDER_IDEMPOTENCY_CONFLICT`;
+    - los otros `409`, `429` (con `Retry-After`), `5xx`, timeout y red → transitorios;
+    - nuevas clases **Configuración** y **Configuración del tenant**.
+  - **`supportsIdempotency()`** en el puerto `EmailSender`: aviso al arrancar si es `false` (SMTP).
+  - **Protección del proveedor:**
+    - `WORKER_PROVIDER_RPS` por instancia, sin ráfaga;
+    - circuit breaker propio (AC-13.9): 5 fallos → 60 s abierto → un único envío de prueba;
+    - abierto, no se toman mensajes, y los ya tomados vuelven sin intento.
+  - **Errores de configuración:**
+    - **key** (`401`, `403` de la key, `404`/`405`): abren el breaker de inmediato y no consumen intento; métrica `email_provider_config_error_total{error}`;
+    - **dominio no verificado** (`403 validation_error`): pausa solo ese tenant (`pause_reason = PROVIDER_DOMAIN`, migración V3, auditoría `TENANT_PAUSED`).
+  - **`POST /admin/v1/tenants/{slug}/resume-sending`** (adelantado de H7):
+    - idempotente;
+    - auditado como `TENANT_RESUMED` con la razón anterior y la nota.
+  - **Tests con WireMock,** sin red real ni correos:
+    - respuesta perdida (NFR-04): misma clave y mismo cuerpo, un solo `SENT`;
+    - limitador;
+    - breaker;
+    - key revocada con 20 mensajes;
+    - dominio no verificado con otro tenant que sigue enviando.
+  - **README:** pasos de staging (equipo de Resend, dominio con SPF/DKIM/DMARC, key, variables) y prueba manual.
+- **Decisiones del owner (2026-10-10):**
+  - cliente HTTP del JDK;
+  - solo `invalid_idempotent_request` es permanente;
+  - `RESEND_API_URL` configurable;
+  - etiquetas `message_id`;
+  - errores de configuración sin consumir intentos, aunque la ventana de 23 h sigue aplicando (`RETRY_WINDOW_EXCEEDED`);
+  - pausa por tenant ante un dominio no verificado.
+- **Pendiente:** webhooks de Resend (H6). La cuenta y el dominio de staging los prepara el owner.
+
 ## 2026-10-10 — NFR-09: caché de Gradle en el build de Docker
 
 - **Hecho:**
