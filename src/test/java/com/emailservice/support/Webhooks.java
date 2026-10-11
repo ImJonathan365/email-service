@@ -67,6 +67,11 @@ public final class Webhooks {
 
 	/** A Resend email event as documented, with the fields that must not be stored. */
 	public static String emailEvent(String type, String emailId, UUID messageIdTag, String extraData) {
+		return emailEvent(type, emailId, messageIdTag, extraData, Instant.now());
+	}
+
+	public static String emailEvent(String type, String emailId, UUID messageIdTag, String extraData,
+			Instant createdAt) {
 		String tags = messageIdTag == null ? "{\"category\": \"reset\"}"
 				: "{\"category\": \"reset\", \"message_id\": \"" + messageIdTag + "\"}";
 		return """
@@ -74,7 +79,7 @@ public final class Webhooks {
 				 "data": {"created_at": "2026-10-11T10:00:00.000Z", "email_id": "%s",
 				          "message_id": "<111-222@email.example.test>", "from": "Sender <no-reply@sender.test>",
 				          "to": ["ana@example.test"], "subject": "Hola Ana", "tags": %s%s}}
-				""".formatted(type, Instant.now(), emailId, tags, extraData.isEmpty() ? "" : ", " + extraData);
+				""".formatted(type, createdAt, emailId, tags, extraData.isEmpty() ? "" : ", " + extraData);
 	}
 
 	/** The stored email_event row for a provider event id, as JSON, or null. */

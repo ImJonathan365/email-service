@@ -18,6 +18,7 @@ import com.emailservice.audit.AuditAction;
 import com.emailservice.audit.AuditLog;
 import com.emailservice.common.config.AppProperties;
 import com.emailservice.common.config.RoleConditions.ConditionalOnWorkerRole;
+import com.emailservice.events.MessageEvents;
 import com.emailservice.provider.EmailSender;
 import com.emailservice.provider.OutboundEmail;
 import com.emailservice.provider.SendException;
@@ -68,9 +69,12 @@ class MessageProcessor {
 
 	private final RetryPolicy retryPolicy;
 
+	private final MessageEvents messageEvents;
+
 	MessageProcessor(QueueRepository queue, EmailSender sender, TemplateEngine engine, SuppressionHashes hashes,
 			JsonMapper jsonMapper, MeterRegistry meters, AuditLog auditLog, CircuitBreaker breaker,
-			ProviderRateLimiter rateLimiter, AppProperties properties) {
+			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, AppProperties properties) {
+		this.messageEvents = messageEvents;
 		this.queue = queue;
 		this.sender = sender;
 		this.engine = engine;
@@ -117,7 +121,7 @@ class MessageProcessor {
 
 		if (message.providerMessageId() != null) {
 			// The provider already accepted it: never call again (AC-13.6).
-			close(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive));
+			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive));
 			return false;
 		}
 		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(Instant.now())) {
@@ -169,7 +173,7 @@ class MessageProcessor {
 					.register(meters)
 					.record(Duration.between(message.createdAt(), Instant.now()));
 			}
-			close(message, closed);
+			sent(message, closed);
 		}
 		catch (SendException ex) {
 			onSendFailure(message, ex, withoutSensitive);
@@ -238,7 +242,19 @@ class MessageProcessor {
 	}
 
 	private void fail(QueueRepository.Claimed message, String code, String detail, String withoutSensitive) {
-		close(message, queue.markFailed(message, code, detail, withoutSensitive));
+		boolean closed = queue.markFailed(message, code, detail, withoutSensitive);
+		close(message, closed);
+		if (closed) {
+			messageEvents.checkAfterFailed(message.tenantId(), message.id(), code);
+		}
+	}
+
+	/** Events that arrived while this worker owned the message apply now, after its own close. */
+	private void sent(QueueRepository.Claimed message, boolean closed) {
+		close(message, closed);
+		if (closed) {
+			messageEvents.applyStoredAfterSent(message.tenantId(), message.id());
+		}
 	}
 
 	/** A close that changed no row means another worker owns the message now: only record it. */

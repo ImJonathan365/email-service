@@ -30,10 +30,13 @@ class EventIngestion {
 
 	private final EventRepository events;
 
+	private final MessageTransitions transitions;
+
 	private final MeterRegistry meters;
 
-	EventIngestion(EventRepository events, MeterRegistry meters) {
+	EventIngestion(EventRepository events, MessageTransitions transitions, MeterRegistry meters) {
 		this.events = events;
+		this.transitions = transitions;
 		this.meters = meters;
 	}
 
@@ -45,7 +48,25 @@ class EventIngestion {
 		Outcome outcome = stored.isEmpty() ? Outcome.DUPLICATE : message == null ? Outcome.ORPHAN : Outcome.PROCESSED;
 		meters.counter("email.webhook.events", "type", event.type().name(), "outcome", outcome.name().toLowerCase())
 			.increment();
+		if (outcome == Outcome.PROCESSED) {
+			applyToMessage(message, event);
+		}
 		return outcome;
+	}
+
+	/** The state change and the side effects are independent: a late event still has its effects (§2). */
+	private void applyToMessage(EventRepository.MessageRef message, ResendEvent event) {
+		transitions.apply(message.tenantId(), message.id(), event.type(), event.occurredAt());
+		transitions.flagIfFailedButHandled(message.id(), message.status(), message.failureCode(), event.type());
+		switch (event.type()) {
+			case DELIVERY_DELAYED -> meters.counter("email.delivery.delayed", "tenant", message.tenantSlug()).increment();
+			case COMPLAINED -> {
+				meters.counter("email.complaints", "tenant", message.tenantSlug()).increment();
+				log.warn("Spam complaint for message {} of tenant {}", message.id(), message.tenantSlug());
+			}
+			default -> {
+			}
+		}
 	}
 
 	/**
