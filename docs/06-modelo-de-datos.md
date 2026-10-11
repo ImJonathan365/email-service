@@ -71,7 +71,7 @@ Nueve tablas en el MVP: `tenant`, `api_key`, `template`, `template_version`, `em
 | `retention_days` | `int` | Default 90 |
 | `store_rendered_content` | `boolean` | Default `false` (privacidad) |
 | `sending_paused_at` | `timestamptz` NULL | **(rev. 2026-10)** Pausa por anomalía (FR-34) |
-| `pause_reason` | `text` NULL CHECK (`VOLUME_ANOMALY`,`BOUNCE_RATE`,`COMPLAINT_RATE`,`MANUAL`) | |
+| `pause_reason` | `text` NULL CHECK (`VOLUME_ANOMALY`,`BOUNCE_RATE`,`COMPLAINT_RATE`,`MANUAL`,`PROVIDER_DOMAIN`) | (rev. 2026-10-10) `PROVIDER_DOMAIN` (V3): el proveedor rechazó el dominio remitente por no verificado; la pone el worker y la levanta un admin con `resume-sending` |
 | `anomaly_overrides` | `jsonb` NULL | **(rev. 2026-10)** Umbrales propios (AC-34.5) |
 | `created_at` / `updated_at` | `timestamptz` | |
 
@@ -244,7 +244,10 @@ Sustituida por `pg_try_advisory_xact_lock(hashtext('<nombre de tarea>'))`. No se
 | `INVALID_RECIPIENT` | Permanente | No | Vigente |
 | `PROVIDER_FAILED` | Permanente (`email.failed`) | No | **Nuevo** |
 | `PROVIDER_SUPPRESSED` | Permanente (`email.suppressed`) | No | **Nuevo** |
-| `PROVIDER_IDEMPOTENCY_CONFLICT` | Permanente (409 del proveedor) | No | **Nuevo** |
+| `PROVIDER_IDEMPOTENCY_CONFLICT` | Permanente (`409 invalid_idempotent_request`: misma clave, cuerpo distinto) | No | **Nuevo**. (rev. 2026-10-10) Los otros `409` (`concurrent_idempotent_requests`, `resource_locked`) son transitorios y quedan como `PROVIDER_UNAVAILABLE` |
+| `PROVIDER_CONFIGURATION` | Configuración (`401`, `403` de la API key, `404`/`405`) | Sí, sin consumir intento | **Nuevo** (rev. 2026-10-10), solo en `attempt_log`; abre el circuit breaker |
+| `PROVIDER_DOMAIN_NOT_VERIFIED` | Configuración del tenant (`403 validation_error`) | Sí, sin consumir intento, tras `resume-sending` | **Nuevo** (rev. 2026-10-10), solo en `attempt_log`; pausa el tenant (`PROVIDER_DOMAIN`) |
+| `TENANT_HELD` / `CIRCUIT_OPEN` / `WORKER_STOPPED` | Retención | Sí, sin consumir intento | **Nuevo** (rev. 2026-10-10), solo en `attempt_log`: tenant retenido, breaker abierto o worker detenido entre la toma y el envío |
 | `PROVIDER_UNAVAILABLE` | Transitorio | Sí | Vigente (en `attempt_log`) |
 | `PROVIDER_RATE_LIMITED` | Transitorio | Sí | Vigente (en `attempt_log`) |
 | `PROVIDER_TIMEOUT` | Transitorio | Sí | Vigente (en `attempt_log`) |
@@ -275,6 +278,7 @@ CREATE TABLE tenant (
     store_rendered_content boolean     NOT NULL DEFAULT false,
     sending_paused_at      timestamptz,
     pause_reason           text CHECK (pause_reason IN ('VOLUME_ANOMALY','BOUNCE_RATE','COMPLAINT_RATE','MANUAL')),
+                           -- V3 adds 'PROVIDER_DOMAIN' (rev. 2026-10-10)
     anomaly_overrides      jsonb,
     created_at             timestamptz NOT NULL DEFAULT now(),
     updated_at             timestamptz NOT NULL DEFAULT now(),

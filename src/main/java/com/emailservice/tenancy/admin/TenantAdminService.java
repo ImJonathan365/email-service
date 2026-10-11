@@ -120,6 +120,25 @@ class TenantAdminService {
 		return updated;
 	}
 
+	/** Idempotent: resuming a tenant that is not paused changes nothing and audits nothing. */
+	@Transactional("systemTransactionManager")
+	TenantView resumeSending(String slug, String note, Actor actor) {
+		TenantView current = tenants.findBySlugForUpdate(slug)
+			.orElseThrow(() -> new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "Tenant '" + slug + "' not found."));
+		if (current.sendingPausedAt() == null) {
+			return current;
+		}
+		TenantView resumed = tenants.resumeSending(current.id());
+		Map<String, Object> details = new LinkedHashMap<>();
+		details.put("pauseReason", current.pauseReason());
+		if (note != null && !note.isBlank()) {
+			details.put("note", note.strip());
+		}
+		auditLog.record(tenants.jdbc(), actor, AuditAction.TENANT_RESUMED, current.id(), "tenant",
+				current.id().toString(), details);
+		return resumed;
+	}
+
 	private void validateLocale(String locale, List<FieldError> errors) {
 		if (!settings.supportedLocales().contains(locale)) {
 			errors.add(new FieldError("locale", "must be one of " + settings.supportedLocales()));

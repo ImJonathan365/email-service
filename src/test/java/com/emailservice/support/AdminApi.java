@@ -51,6 +51,10 @@ public final class AdminApi {
 		assertThat(admin(http.patch("/admin/v1/tenants/" + tenant.slug())).json(body).send().statusCode()).isEqualTo(200);
 	}
 
+	public HttpResponse<String> resumeSending(Tenant tenant, String body) throws Exception {
+		return admin(http.post("/admin/v1/tenants/" + tenant.slug() + "/resume-sending")).json(body).send();
+	}
+
 	public void revoke(Key key) throws Exception {
 		assertThat(admin(http.delete("/admin/v1/api-keys/" + key.id())).send().statusCode()).isEqualTo(204);
 	}

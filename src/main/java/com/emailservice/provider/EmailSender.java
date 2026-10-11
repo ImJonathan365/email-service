@@ -10,6 +10,12 @@ public interface EmailSender {
 	String name();
 
 	/**
+	 * Whether the provider deduplicates by the idempotency key. Without it a lost response can
+	 * become a duplicate email (ADR-0010), so the worker warns at startup.
+	 */
+	boolean supportsIdempotency();
+
+	/**
 	 * Sends one email. {@code email.messageId()} is the idempotency key for providers that support
 	 * one (ADR-0010), so a retry of the same message never produces a second email.
 	 */

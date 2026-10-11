@@ -53,4 +53,11 @@ class TenantAdminController {
 		return service.update(slug, body, AdminAuthenticationFilter.actor(request));
 	}
 
+	@PostMapping("/{slug}/resume-sending")
+	@Operation(summary = "Lift an automatic or manual sending pause; the held queue resumes (FR-34, AC-34.4)")
+	TenantView resumeSending(@PathVariable String slug, @Valid @RequestBody(required = false) TenantRequests.Resume body,
+			HttpServletRequest request) {
+		return service.resumeSending(slug, body == null ? null : body.note(), AdminAuthenticationFilter.actor(request));
+	}
+
 }

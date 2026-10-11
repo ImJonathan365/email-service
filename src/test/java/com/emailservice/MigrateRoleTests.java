@@ -35,7 +35,7 @@ class MigrateRoleTests {
 				ResultSet rs = owner.createStatement()
 					.executeQuery("SELECT count(*) FROM flyway_schema_history WHERE success")) {
 			rs.next();
-			assertThat(rs.getInt(1)).isEqualTo(2);
+			assertThat(rs.getInt(1)).isEqualTo(3);
 		}
 	}
 

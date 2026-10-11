@@ -9,6 +9,12 @@ public class NoopEmailSender implements EmailSender {
 	}
 
 	@Override
+	public boolean supportsIdempotency() {
+		// Nothing is sent, so nothing can be duplicated.
+		return true;
+	}
+
+	@Override
 	public SendResult send(OutboundEmail email) {
 		return new SendResult(name(), "noop-" + email.messageId());
 	}

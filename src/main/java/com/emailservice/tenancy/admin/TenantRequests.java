@@ -38,6 +38,10 @@ final class TenantRequests {
 			Boolean storeRenderedContent) {
 	}
 
+	record Resume(@Schema(example = "Domain verified again in the provider") @Size(max = 500)
+	@Pattern(regexp = NO_LINE_BREAKS) String note) {
+	}
+
 	/** Partial update: a null or absent field keeps its current value. */
 	record Update(
 			@Size(min = 1, max = 200) @Pattern(regexp = NO_LINE_BREAKS) String name,

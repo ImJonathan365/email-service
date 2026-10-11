@@ -1,5 +1,6 @@
 package com.emailservice.common.config;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -16,7 +17,7 @@ import com.emailservice.common.web.Cidr;
  */
 @ConfigurationProperties("app")
 public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin admin, Tenancy tenancy, Mail mail,
-		Sending sending, Worker worker) {
+		Sending sending, Worker worker, Provider provider) {
 
 	public AppProperties {
 		Objects.requireNonNull(env, "APP_ENV is required");
@@ -28,6 +29,7 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 		mail = mail == null ? Mail.DEFAULTS : mail;
 		sending = sending == null ? Sending.DEFAULTS : sending;
 		worker = worker == null ? Worker.DEFAULTS : worker;
+		provider = provider == null ? Provider.DEFAULTS : provider;
 
 		List<String> problems = new ArrayList<>();
 		if (isBlank(db.url())) {
@@ -49,6 +51,7 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			mail.validate(env, problems);
 			sending.validate(env, problems);
 			worker.validate(mail, problems);
+			provider.validate(env, mail, problems);
 		}
 		if (!problems.isEmpty()) {
 			throw new IllegalStateException("Invalid configuration for APP_ENV=%s APP_ROLE=%s: %s"
@@ -184,6 +187,8 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 		public static final String NOOP = "noop";
 
+		public static final String RESEND = "resend";
+
 		static final Mail DEFAULTS = new Mail(SMTP, "mailpit", 1025, false, 3_000, 10_000);
 
 		public Mail {
@@ -207,8 +212,10 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 						problems.add("MAIL_PROVIDER=noop is not allowed in production");
 					}
 				}
-				case "resend" -> problems.add("MAIL_PROVIDER=resend is not available yet (milestone H5)");
-				default -> problems.add("MAIL_PROVIDER must be smtp or noop");
+				case RESEND -> {
+					// Validated with the Provider section, which holds the Resend credentials.
+				}
+				default -> problems.add("MAIL_PROVIDER must be resend, smtp or noop");
 			}
 			if (connectTimeoutMs <= 0 || readTimeoutMs <= 0) {
 				problems.add("PROVIDER_CONNECT_TIMEOUT_MS and PROVIDER_READ_TIMEOUT_MS must be positive");
@@ -296,6 +303,53 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			if (window >= RETRY_WINDOW_SECONDS) {
 				problems.add("RETRY_BACKOFF_SECONDS x 1.2 + MAX_ATTEMPTS x LOCK_TIMEOUT_SECONDS must stay under 23 h (AC-13.7)");
 			}
+		}
+
+	}
+
+	/**
+	 * The real provider (ADR-0016) and the worker's protection around it: per-instance rate limit
+	 * (AC-12.6, NFR-21) and circuit breaker (AC-13.9).
+	 */
+	public record Provider(String resendApiKey, String resendApiUrl, int workerProviderRps, int circuitBreakerFailures,
+			int circuitBreakerOpenSeconds) {
+
+		static final Provider DEFAULTS = new Provider("", "https://api.resend.com", 8, 5, 60);
+
+		public Provider {
+			resendApiUrl = isBlank(resendApiUrl) ? "https://api.resend.com" : resendApiUrl.trim();
+		}
+
+		private void validate(AppEnv env, Mail mail, List<String> problems) {
+			if (Mail.RESEND.equals(mail.provider())) {
+				if (isBlank(resendApiKey)) {
+					problems.add("RESEND_API_KEY is required with MAIL_PROVIDER=resend");
+				}
+				URI uri;
+				try {
+					uri = URI.create(resendApiUrl);
+				}
+				catch (IllegalArgumentException ex) {
+					uri = null;
+				}
+				if (uri == null || uri.getHost() == null || !("https".equals(uri.getScheme())
+						|| (env == AppEnv.LOCAL && "http".equals(uri.getScheme())))) {
+					problems.add("RESEND_API_URL must be an https URL (plain http only with APP_ENV=local)");
+				}
+			}
+			if (workerProviderRps < 1) {
+				problems.add("WORKER_PROVIDER_RPS must be at least 1");
+			}
+			if (circuitBreakerFailures < 1 || circuitBreakerOpenSeconds < 1) {
+				problems.add("CIRCUIT_BREAKER_FAILURES and CIRCUIT_BREAKER_OPEN_SECONDS must be at least 1");
+			}
+		}
+
+		@Override
+		public String toString() {
+			return "Provider[resendApiKey=***, resendApiUrl=" + resendApiUrl + ", workerProviderRps=" + workerProviderRps
+					+ ", circuitBreakerFailures=" + circuitBreakerFailures + ", circuitBreakerOpenSeconds="
+					+ circuitBreakerOpenSeconds + "]";
 		}
 
 	}
