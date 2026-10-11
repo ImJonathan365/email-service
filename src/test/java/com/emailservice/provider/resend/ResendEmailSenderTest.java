@@ -34,7 +34,7 @@ import tools.jackson.databind.json.JsonMapper;
 /** ADR-0016 and docs/05 §4 against a local WireMock standing in for Resend; no network, no email. */
 class ResendEmailSenderTest {
 
-	static final String KEY = "re_test_0123456789";
+	static final String KEY = "re_test_0123456789"; // gitleaks:allow (fictional, only sent to WireMock)
 
 	static WireMockServer resend;
 
