@@ -201,7 +201,7 @@ La fila (sin contenido) se conserva hasta la purga del mensaje, para que `GET /v
 | `provider_type` | `text` | **(rev. 2026-10)** Tipo original (`email.bounced`…) |
 | `occurred_at` | `timestamptz` | Según el proveedor |
 | `received_at` | `timestamptz` | Default `now()` |
-| `payload` | `jsonb` | **(rev. 2026-10)** Minimizado (AC-17.1) |
+| `payload` | `jsonb` | **(rev. 2026-10)** Minimizado (AC-17.1). **(rev. 2026-10-11)** Lista blanca de campos en `05` §4 (H6); nunca direcciones, asunto, cabeceras, IP, user agent ni la query de los clics |
 
 ### 3.7 `suppression` — direcciones bloqueadas (rev. 2026-10, ADR-0012)
 

@@ -80,6 +80,11 @@ Reglas de dependencia (verificables con ArchUnit):
 - `templates` no conoce `sending`; recibe texto y variables, devuelve texto renderizado.
 - Toda consulta de tenant pasa por un repositorio que exige `tenantId` y usa `tenantDataSource` (rol `email_app`, RLS).
 - **(rev. 2026-10)** `systemDataSource` (rol `email_system`) solo se inyecta en `sending.worker`, `events`, `tenancy.auth`, `tenancy.admin`, `abuse` y `maintenance`.
+- **(rev. 2026-10-11, owner)** Reglas añadidas en H6:
+  - no hay ciclos entre los módulos de primer nivel (ArchUnit);
+  - `sending` depende de `events` (supresiones, eventos guardados) y `events` nunca de `sending`: si `events` actualiza `email_message`, lo hace con su propio repositorio sobre el DataSource de sistema;
+  - `EmailAddresses` (normalización y validación) y `SuppressionHashes` viven en `events`, el dueño de las supresiones;
+  - el gestor de transacciones de tenant está en `tenancy` (antes en `common`, que formaba un ciclo).
 
 ## 3. Flujo de envío (camino feliz) (rev. 2026-10)
 
@@ -157,6 +162,28 @@ Reglas de dependencia (verificables con ArchUnit):
 
 Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_ATTEMPTS` = 6 (5 esperas + 1). Ventana total < 23 h, validada al arrancar (AC-13.7). Un `429` con `Retry-After` respeta ese valor.
 
+**(rev. 2026-10-11) Comportamiento implementado en H6 (eventos):**
+- **Webhook:**
+  - `SvixWebhookVerifier` (propio, sin SDK) detrás de `WebhookVerifier`: HMAC-SHA256 sobre `svix-id.svix-timestamp.<cuerpo crudo>`, comparación en tiempo constante, uno o dos secretos `whsec_`, ventana ±`WEBHOOK_TOLERANCE_SECONDS`;
+  - se verifica con el ejemplo publicado por Svix;
+  - el endpoint solo existe con `APP_ROLE=api|all`.
+- **Una transacción por evento** (rol `email_system`):
+  - `INSERT … ON CONFLICT (provider, provider_event_id) DO NOTHING`: un duplicado no tiene efectos;
+  - después, el cambio de estado por precedencia (cada `UPDATE` enumera los estados de los que puede salir) y las supresiones, independientes entre sí.
+- **Eventos tempranos y fallo con evento posterior:** ver `02` §2.
+- **Supresiones desde eventos:** `bounced` → `HARD_BOUNCE`, `complained` → `COMPLAINT`, `suppressed` y `suppression.added` → `PROVIDER`, todas globales; `suppression.removed` solo retira `PROVIDER`. Regla de `cc`/`bcc`: AC-10.3.
+- **Payload minimizado por lista blanca:**
+  - se guardan: `type`, `created_at`, `data.email_id`, `data.created_at`, `tags.message_id`, `bounce.type/subType`, `suppressed.type`, los timestamps de click y open, `click.link` sin query ni fragmento, y en `suppression.*` los campos `id`, `origin` y `source_id`;
+  - nunca se guardan direcciones, asunto, cabeceras, IP ni user agent.
+- **Métricas:**
+  - `email_webhook_events_total{type,outcome}` (`outcome` = `processed`, `duplicate` u `orphan`);
+  - `email_webhook_rejected_total{reason}`;
+  - `email_webhook_correlation_conflict_total`;
+  - `email_complaints_total{tenant}` (alerta) y `email_delivery_delayed_total{tenant}`;
+  - `email_event_after_failure_total`;
+  - `email_suppressions_created_total{reason}`.
+- **Fuera de H6:** la purga de huérfanos a los 30 días (AC-16.5, tarea `purgeExpiredData`) y el historial de eventos en `GET /v1/emails/{id}` (H7).
+
 **Salvaguardas anti-duplicados (rev. 2026-10):**
 1. `Idempotency-Key = message.id` hacia el proveedor (deduplicación de 24 h).
 2. Cierre con `lock_token`: un worker que perdió el lock no cierra ni reintenta.
@@ -190,8 +217,8 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
 | `RESEND_API_KEY` | — | Secreto; **obligatoria** con `MAIL_PROVIDER=resend` (rev. 2026-10-10). Nunca se registra en logs |
 | `RESEND_API_URL` | `https://api.resend.com` | (rev. 2026-10-10) Base de la API; debe ser `https` salvo con `APP_ENV=local` (pruebas contra un stub) |
-| `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación |
-| `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp |
+| `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación. **(rev. 2026-10-11)** Obligatorio con `MAIL_PROVIDER=resend` y `APP_ROLE=api\|all`; cada valor `whsec_` + base64. Sin él, `/webhooks/resend` no existe |
+| `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp (1–3600) |
 | `SMTP_HOST` / `SMTP_PORT` | `mailpit` / `1025` | Modo desarrollo |
 | `ALLOW_SMTP_IN_PRODUCTION` | `false` | Fail-fast si `production` + `smtp` |
 | `PROVIDER_CONNECT_TIMEOUT_MS` / `PROVIDER_READ_TIMEOUT_MS` | `3000` / `10000` | Timeouts hacia el proveedor |
