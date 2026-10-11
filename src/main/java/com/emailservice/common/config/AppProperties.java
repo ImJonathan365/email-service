@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -51,7 +52,7 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			mail.validate(env, problems);
 			sending.validate(env, problems);
 			worker.validate(mail, problems);
-			provider.validate(env, mail, problems);
+			provider.validate(env, role, mail, problems);
 		}
 		if (!problems.isEmpty()) {
 			throw new IllegalStateException("Invalid configuration for APP_ENV=%s APP_ROLE=%s: %s"
@@ -309,21 +310,30 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 	/**
 	 * The real provider (ADR-0016) and the worker's protection around it: per-instance rate limit
-	 * (AC-12.6, NFR-21) and circuit breaker (AC-13.9).
+	 * (AC-12.6, NFR-21) and circuit breaker (AC-13.9). The webhook secrets verify its Svix
+	 * signatures (FR-16); two are accepted while one endpoint replaces another (docs/08 §1).
 	 */
 	public record Provider(String resendApiKey, String resendApiUrl, int workerProviderRps, int circuitBreakerFailures,
-			int circuitBreakerOpenSeconds) {
+			int circuitBreakerOpenSeconds, List<String> webhookSigningSecrets, int webhookToleranceSeconds) {
 
-		static final Provider DEFAULTS = new Provider("", "https://api.resend.com", 8, 5, 60);
+		static final Provider DEFAULTS = new Provider("", "https://api.resend.com", 8, 5, 60, List.of(), 300);
+
+		private static final Pattern WEBHOOK_SECRET = Pattern.compile("whsec_[A-Za-z0-9+/]{22,}={0,2}");
 
 		public Provider {
 			resendApiUrl = isBlank(resendApiUrl) ? "https://api.resend.com" : resendApiUrl.trim();
+			webhookSigningSecrets = trimmed(webhookSigningSecrets);
+			webhookToleranceSeconds = webhookToleranceSeconds == 0 ? 300 : webhookToleranceSeconds;
 		}
 
-		private void validate(AppEnv env, Mail mail, List<String> problems) {
+		private void validate(AppEnv env, AppRole role, Mail mail, List<String> problems) {
+			boolean servesApi = role == AppRole.API || role == AppRole.ALL;
 			if (Mail.RESEND.equals(mail.provider())) {
 				if (isBlank(resendApiKey)) {
 					problems.add("RESEND_API_KEY is required with MAIL_PROVIDER=resend");
+				}
+				if (servesApi && webhookSigningSecrets.isEmpty()) {
+					problems.add("MAIL_WEBHOOK_SIGNING_SECRET is required with MAIL_PROVIDER=resend and APP_ROLE=api|all");
 				}
 				URI uri;
 				try {
@@ -343,13 +353,21 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			if (circuitBreakerFailures < 1 || circuitBreakerOpenSeconds < 1) {
 				problems.add("CIRCUIT_BREAKER_FAILURES and CIRCUIT_BREAKER_OPEN_SECONDS must be at least 1");
 			}
+			if (webhookSigningSecrets.size() > 2
+					|| webhookSigningSecrets.stream().anyMatch(secret -> !WEBHOOK_SECRET.matcher(secret).matches())) {
+				problems.add("MAIL_WEBHOOK_SIGNING_SECRET must hold one or two comma-separated whsec_ secrets");
+			}
+			if (webhookToleranceSeconds < 1 || webhookToleranceSeconds > 3600) {
+				problems.add("WEBHOOK_TOLERANCE_SECONDS must be between 1 and 3600");
+			}
 		}
 
 		@Override
 		public String toString() {
 			return "Provider[resendApiKey=***, resendApiUrl=" + resendApiUrl + ", workerProviderRps=" + workerProviderRps
 					+ ", circuitBreakerFailures=" + circuitBreakerFailures + ", circuitBreakerOpenSeconds="
-					+ circuitBreakerOpenSeconds + "]";
+					+ circuitBreakerOpenSeconds + ", webhookSigningSecrets=" + webhookSigningSecrets.size()
+					+ " x ***, webhookToleranceSeconds=" + webhookToleranceSeconds + "]";
 		}
 
 	}

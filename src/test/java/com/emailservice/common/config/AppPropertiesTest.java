@@ -164,25 +164,57 @@ class AppPropertiesTest {
 	void resendNeedsItsKeyAndAnHttpsEndpointOutsideLocal() {
 		AppProperties.Mail resend = new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000);
 		Db db = new Db(URL, APP, SYSTEM, NONE);
-		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider(" ", null, 8, 5, 60)))
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider(" ", null, 8, 5, 60, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("RESEND_API_KEY");
 		assertThatThrownBy(
-				() -> resend(AppEnv.STAGING, new AppProperties.Provider("re_secret", "http://resend.test", 8, 5, 60)))
+				() -> resend(AppEnv.STAGING, new AppProperties.Provider("re_secret", "http://resend.test", 8, 5, 60, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("RESEND_API_URL")
 			.message()
 			.doesNotContain("re_secret");
-		assertThat(resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", "http://localhost:8089", 8, 5, 60))
+		assertThat(resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", "http://localhost:8089", 8, 5, 60, WEBHOOK_SECRETS, 300))
 			.provider()
 			.resendApiUrl()).isEqualTo("http://localhost:8089");
-		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 0, 5, 60)))
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 0, 5, 60, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("WORKER_PROVIDER_RPS");
-		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 0, 0)))
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 0, 0, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("CIRCUIT_BREAKER_FAILURES")
 			.hasMessageContaining("CIRCUIT_BREAKER_OPEN_SECONDS");
 		AppProperties production = new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null, resend,
-				SENDING, null, new AppProperties.Provider("re_secret", null, 8, 5, 60));
+				SENDING, null, new AppProperties.Provider("re_secret", null, 8, 5, 60, WEBHOOK_SECRETS, 300));
 		assertThat(production.provider().resendApiUrl()).isEqualTo("https://api.resend.com");
 		assertThat(production.toString()).doesNotContain("re_secret");
+	}
+
+	/** Fictional, test-only Svix secret. */
+	static final String WEBHOOK_SECRET = "whsec_dGVzdC1vbmx5LXdlYmhvb2stc2VjcmV0LTAwMDE="; // gitleaks:allow
+
+	static final List<String> WEBHOOK_SECRETS = List.of(WEBHOOK_SECRET);
+
+	@Test
+	void ac_16_1_webhookSecretsAreRequiredForTheResendApiAndNeverPrinted() {
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 5, 60, List.of(), 300)))
+			.hasMessageContaining("MAIL_WEBHOOK_SIGNING_SECRET is required");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL,
+				new AppProperties.Provider("re_secret", null, 8, 5, 60, List.of("not-a-secret"), 300)))
+			.hasMessageContaining("whsec_")
+			.message()
+			.doesNotContain("not-a-secret");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 5, 60,
+				List.of(WEBHOOK_SECRET, WEBHOOK_SECRET, WEBHOOK_SECRET), 300)))
+			.hasMessageContaining("one or two");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL,
+				new AppProperties.Provider("re_secret", null, 8, 5, 60, WEBHOOK_SECRETS, 7200)))
+			.hasMessageContaining("WEBHOOK_TOLERANCE_SECONDS");
+		AppProperties rotating = resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 5, 60,
+				List.of(WEBHOOK_SECRET, " whsec_dGVzdC1vbmx5LXdlYmhvb2stc2VjcmV0LTAwMDI= "), 0)); // gitleaks:allow
+		assertThat(rotating.provider().webhookSigningSecrets()).hasSize(2);
+		assertThat(rotating.provider().webhookToleranceSeconds()).isEqualTo(300);
+		assertThat(rotating.toString()).doesNotContain("whsec_");
+		// A worker never receives webhooks, so it does not need the secret.
+		assertThat(new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, new Db(URL, APP, SYSTEM, NONE), null, null,
+				null, new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000), SENDING, null,
+				new AppProperties.Provider("re_secret", null, 8, 5, 60, List.of(), 300)))
+			.isNotNull();
 	}
 
 	private static AppProperties resend(AppEnv env, AppProperties.Provider provider) {

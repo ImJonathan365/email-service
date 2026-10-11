@@ -2,12 +2,15 @@ package com.emailservice.architecture;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 
 import com.emailservice.common.persistence.SystemDataSource;
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaAnnotation;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.properties.HasAnnotations;
@@ -55,6 +58,42 @@ final class ArchitectureRules {
 		.dependOnClassesThat()
 		.resideInAPackage("com.emailservice.sending..")
 		.because("templates receive text and variables and return rendered text (docs/05 §2)");
+
+	/** The ports of docs/05 §2 and the value types they exchange. */
+	static final Set<String> PROVIDER_PORTS = Set.of("EmailSender", "OutboundEmail", "SendException", "SendResult",
+			"WebhookVerifier");
+
+	static final ArchRule PROVIDER_ONLY_THROUGH_PORTS = noClasses().that()
+		.resideInAnyPackage("com.emailservice.sending..", "com.emailservice.events..")
+		.should()
+		.dependOnClassesThat(providerImplementation())
+		.because("sending and events reach the provider only through EmailSender and WebhookVerifier (docs/05 §2)");
+
+	static final ArchRule EVENTS_DO_NOT_KNOW_SENDING = noClasses().that()
+		.resideInAPackage("com.emailservice.events..")
+		.should()
+		.dependOnClassesThat()
+		.resideInAPackage("com.emailservice.sending..")
+		.because("sending depends on events, never the other way round; events owns its own message updates");
+
+	static final ArchRule MODULES_FREE_OF_CYCLES = slices().matching("com.emailservice.(*)..")
+		.should()
+		.beFreeOfCycles()
+		.because("first-level modules form a dependency graph without cycles");
+
+	private static DescribedPredicate<JavaClass> providerImplementation() {
+		return DescribedPredicate.describe("are provider classes other than its ports", javaClass -> {
+			if (!javaClass.getPackageName().startsWith("com.emailservice.provider")) {
+				return false;
+			}
+			JavaClass outermost = javaClass;
+			while (outermost.getEnclosingClass().isPresent()) {
+				outermost = outermost.getEnclosingClass().get();
+			}
+			return !(outermost.getPackageName().equals("com.emailservice.provider")
+					&& PROVIDER_PORTS.contains(outermost.getSimpleName()));
+		});
+	}
 
 	private ArchitectureRules() {
 	}

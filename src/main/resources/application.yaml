@@ -90,3 +90,5 @@ app:
     worker-provider-rps: ${WORKER_PROVIDER_RPS:8}
     circuit-breaker-failures: ${CIRCUIT_BREAKER_FAILURES:5}
     circuit-breaker-open-seconds: ${CIRCUIT_BREAKER_OPEN_SECONDS:60}
+    webhook-signing-secrets: ${MAIL_WEBHOOK_SIGNING_SECRET:}
+    webhook-tolerance-seconds: ${WEBHOOK_TOLERANCE_SECONDS:300}

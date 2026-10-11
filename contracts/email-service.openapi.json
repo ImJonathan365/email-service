@@ -838,6 +838,57 @@
         "summary" : "Publish a draft; it becomes immutable and archives the previous one of its locale (FR-05)",
         "tags" : [ "Templates" ]
       }
+    },
+    "/webhooks/{provider}" : {
+      "post" : {
+        "operationId" : "receive",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "svix-id",
+          "required" : true
+        }, {
+          "in" : "header",
+          "name" : "svix-timestamp",
+          "required" : true
+        }, {
+          "in" : "header",
+          "name" : "svix-signature",
+          "required" : true
+        }, {
+          "in" : "path",
+          "name" : "provider",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "format" : "byte",
+                "type" : "string"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "204" : {
+            "description" : "Processed, duplicate or orphan"
+          },
+          "400" : {
+            "description" : "Authentic but unreadable body"
+          },
+          "401" : {
+            "description" : "Invalid or missing signature, or outside the window"
+          },
+          "503" : {
+            "description" : "Database unavailable; the provider retries"
+          }
+        },
+        "summary" : "Provider events, authenticated by the provider's signature (FR-16, FR-17)",
+        "tags" : [ "Provider webhooks" ]
+      }
     }
   },
   "servers" : [ {
