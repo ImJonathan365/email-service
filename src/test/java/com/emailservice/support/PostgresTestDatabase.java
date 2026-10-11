@@ -31,9 +31,6 @@ public final class PostgresTestDatabase {
 
 	private static final PostgreSQLContainer CONTAINER = new PostgreSQLContainer(
 			DockerImageName.parse("postgres:18-alpine"))
-		// Each cached Spring test context keeps its two pools (14 connections) open; the default of
-		// 100 runs out once a few contexts exist.
-		.withCommand("postgres", "-c", "max_connections=300")
 		.withEnv("DB_OWNER_PASSWORD", Role.OWNER.password)
 		.withEnv("DB_APP_PASSWORD", Role.APP.password)
 		.withEnv("DB_SYSTEM_PASSWORD", Role.SYSTEM.password)

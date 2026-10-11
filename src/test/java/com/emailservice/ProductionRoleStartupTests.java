@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -14,6 +15,8 @@ import com.emailservice.support.IntegrationTestEnvironment;
 import com.emailservice.support.PostgresTestDatabase;
 
 /** NFR-09: production api/worker instances start without owner credentials and never migrate. */
+// A one-off configuration: closed after this class so its pools do not stay open for the rest of the suite.
+@DirtiesContext
 @SpringBootTest(properties = { "app.env=production", "app.role=api" })
 class ProductionRoleStartupTests {
 

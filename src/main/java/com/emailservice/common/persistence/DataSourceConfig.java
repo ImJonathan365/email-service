@@ -2,6 +2,7 @@ package com.emailservice.common.persistence;
 
 import javax.sql.DataSource;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -21,20 +22,22 @@ import com.zaxxer.hikari.HikariDataSource;
 @Configuration(proxyBeanMethods = false)
 public class DataSourceConfig {
 
-	private static final int TENANT_POOL_SIZE = 10;
-
-	private static final int SYSTEM_POOL_SIZE = 4;
-
+	/**
+	 * 10 and 4 connections per instance in every deployed environment. The sizes are properties only
+	 * so the test suite can run smaller pools; they are not part of the documented configuration.
+	 */
 	@Bean
 	@Primary
-	HikariDataSource tenantDataSource(AppProperties properties) {
-		return pool("tenant", properties.db().url(), properties.db().app(), TENANT_POOL_SIZE);
+	HikariDataSource tenantDataSource(AppProperties properties,
+			@Value("${app.db.tenant-pool-size:10}") int tenantPoolSize) {
+		return pool("tenant", properties.db().url(), properties.db().app(), tenantPoolSize);
 	}
 
 	@Bean
 	@SystemDataSource
-	HikariDataSource systemDataSource(AppProperties properties) {
-		return pool("system", properties.db().url(), properties.db().system(), SYSTEM_POOL_SIZE);
+	HikariDataSource systemDataSource(AppProperties properties,
+			@Value("${app.db.system-pool-size:4}") int systemPoolSize) {
+		return pool("system", properties.db().url(), properties.db().system(), systemPoolSize);
 	}
 
 	@Bean

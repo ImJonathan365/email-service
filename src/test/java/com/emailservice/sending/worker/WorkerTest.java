@@ -6,33 +6,19 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 
 import com.emailservice.provider.EmailSender;
 import com.emailservice.support.IntegrationTest;
+import com.emailservice.support.MutableClock;
 import com.emailservice.support.PostgresTestDatabase;
 import com.emailservice.support.PostgresTestDatabase.Role;
 
 /**
- * Base for worker tests: a recording stub provider instead of any real one, and a quiet queue.
- * The claim spans all tenants, so messages left QUEUED by other test classes are cancelled first.
+ * Base for worker tests: the shared recording provider instead of any real one, a closed circuit
+ * breaker and a quiet queue. The claim spans all tenants, so messages left QUEUED by other test
+ * classes are cancelled first.
  */
-@Import(WorkerTest.StubProvider.class)
 abstract class WorkerTest extends IntegrationTest {
-
-	@TestConfiguration
-	static class StubProvider {
-
-		@Bean
-		@Primary
-		RecordingEmailSender recordingEmailSender() {
-			return new RecordingEmailSender();
-		}
-
-	}
 
 	@Autowired
 	RecordingEmailSender sender;
@@ -46,9 +32,17 @@ abstract class WorkerTest extends IntegrationTest {
 	@Autowired
 	EmailSender activeSender;
 
+	@Autowired
+	CircuitBreaker breaker;
+
+	@Autowired
+	MutableClock clock;
+
 	@BeforeEach
 	void quietQueue() throws Exception {
 		sender.reset();
+		clock.reset();
+		breaker.onSuccess();
 		cancelPendingMessages();
 	}
 

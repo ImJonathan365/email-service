@@ -34,6 +34,9 @@ public final class IntegrationTestEnvironment {
 		registry.add("app.provider.webhook-signing-secrets", () -> WEBHOOK_SECRET);
 		// No mail server in tests; sending tests install their own recording sender.
 		registry.add("app.mail.provider", () -> "noop");
+		// Small pools: a test drives one request or one worker pass at a time.
+		registry.add("app.db.tenant-pool-size", () -> "5");
+		registry.add("app.db.system-pool-size", () -> "3");
 		// Tests drive the queue explicitly (QueueWorker.runOnce) instead of racing a background loop.
 		registry.add("app.worker.autostart", () -> "false");
 	}

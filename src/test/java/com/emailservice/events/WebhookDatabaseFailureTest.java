@@ -1,48 +1,68 @@
 package com.emailservice.events;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 
 import java.net.http.HttpResponse;
+import java.sql.Connection;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.QueryTimeoutException;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import com.emailservice.support.IntegrationTest;
+import com.emailservice.support.PostgresTestDatabase;
+import com.emailservice.support.PostgresTestDatabase.Role;
 import com.emailservice.support.Webhooks;
 
-/** AC-16.7: only a database failure turns into 503, so the provider retries the delivery. */
+/**
+ * AC-16.7: only a database failure turns into 503, so the provider retries the delivery. The
+ * failures are real ones caused through the owner role and undone right after, so this test runs
+ * in the shared context without mocks.
+ */
 class WebhookDatabaseFailureTest extends IntegrationTest {
 
-	@MockitoSpyBean
-	EventRepository events;
+	HttpResponse<String> deliver(String eventId) throws Exception {
+		return new Webhooks(http()).post(eventId,
+				Webhooks.emailEvent("email.delivered", UUID.randomUUID().toString(), null, ""));
+	}
+
+	static void asOwner(String statement) throws Exception {
+		try (Connection owner = PostgresTestDatabase.connect(Role.OWNER)) {
+			owner.createStatement().execute(statement);
+		}
+	}
 
 	@Test
 	void ac_16_7_aDatabaseErrorAnswers503AndStoresNothing() throws Exception {
-		doThrow(new DataAccessResourceFailureException("connection refused")).when(events)
-			.insert(any(), any(), any(), any(), any(), any(), any());
 		String eventId = Webhooks.newEventId();
-
-		HttpResponse<String> response = new Webhooks(http()).post(eventId,
-				Webhooks.emailEvent("email.delivered", UUID.randomUUID().toString(), null, ""));
+		asOwner("REVOKE INSERT ON email_event FROM email_system");
+		HttpResponse<String> response;
+		try {
+			response = deliver(eventId);
+		}
+		finally {
+			asOwner("GRANT INSERT ON email_event TO email_system");
+		}
 
 		assertThat(response.statusCode()).isEqualTo(503);
 		assertThat(response.body()).contains("SERVICE_UNAVAILABLE");
 		assertThat(Webhooks.countEvents(eventId)).isZero();
+		// Once the database is back, the provider's retry of the same event succeeds.
+		assertThat(deliver(eventId).statusCode()).isEqualTo(204);
+		assertThat(Webhooks.countEvents(eventId)).isOne();
 	}
 
 	@Test
-	void ac_16_7_anyOtherDataAccessErrorIsAlso503() throws Exception {
-		doThrow(new QueryTimeoutException("statement timeout")).when(events)
-			.insert(any(), any(), any(), any(), any(), any(), any());
+	void ac_16_7_aMissingTableIsAlso503() throws Exception {
+		asOwner("ALTER TABLE email_event RENAME TO email_event_unavailable");
+		HttpResponse<String> response;
+		try {
+			response = deliver(Webhooks.newEventId());
+		}
+		finally {
+			asOwner("ALTER TABLE email_event_unavailable RENAME TO email_event");
+		}
 
-		assertThat(new Webhooks(http())
-			.post(Webhooks.newEventId(), Webhooks.emailEvent("email.delivered", UUID.randomUUID().toString(), null, ""))
-			.statusCode()).isEqualTo(503);
+		assertThat(response.statusCode()).isEqualTo(503);
 	}
 
 }

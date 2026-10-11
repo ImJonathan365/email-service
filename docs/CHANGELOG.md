@@ -2,6 +2,17 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-11 — Tests: un solo contexto de Spring compartido
+
+- **Hecho:**
+  - **Contextos de Spring Test:** de 7 a 4 creados; al final de la suite solo queda abierto 1 (log de caché de Spring Test).
+    - `WorkerTest`, `ResendWorkerTest` y `WebhookDatabaseFailureTest` usan ahora el contexto común. Los dobles de test compartidos (`SharedTestBeans`: proveedor espía y reloj controlable) se programan y se restauran; ya no se declaran beans por clase.
+    - El `503` se prueba con errores reales de BD (privilegio revocado, tabla renombrada), sin `@MockitoSpyBean`.
+    - Siguen aparte, con `@DirtiesContext`, los que cambian configuración global: `SendingPolicyConfigTest` y los arranques con `APP_ROLE=worker` y `APP_ENV=production`.
+  - **Pools en test:** 5 de tenant y 3 de sistema. Producción sigue con 10 y 4.
+  - **Conexiones:** el contenedor de test vuelve a las 100 por defecto.
+- **Mediciones:** la suite tarda lo mismo (46 s antes; 42–47 s después). Lo que baja son las conexiones abiertas a la vez.
+
 ## 2026-10-11 — H6: eventos y supresiones
 
 - **Hecho:**
