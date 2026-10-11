@@ -4,10 +4,11 @@ FROM eclipse-temurin:25-jdk AS build
 WORKDIR /workspace
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle gradle
-# Resolve dependencies in their own layer so source changes do not re-download them.
-RUN ./gradlew --no-daemon --quiet dependencies > /dev/null
+# Gradle's distribution and dependencies live in a BuildKit cache mount: kept between builds even
+# when the layer cache is cold (NFR-09), and never part of any image layer.
+RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet dependencies > /dev/null
 COPY src src
-RUN ./gradlew --no-daemon bootJar \
+RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon bootJar \
     && java -Djarmode=tools -jar build/libs/app.jar extract --layers --destination extracted
 
 FROM eclipse-temurin:25-jre

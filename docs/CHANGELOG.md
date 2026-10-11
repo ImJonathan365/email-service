@@ -2,6 +2,16 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-10 — NFR-09: caché de Gradle en el build de Docker
+
+- **Hecho:**
+  - `Dockerfile`: *cache mount* de BuildKit para `/root/.gradle` en los pasos de dependencias y `bootJar`. La imagen final no cambia (563 MB).
+  - NFR-09 ajustado: ≤ 90 s con la caché de capas o de Gradle disponible; ≤ 150 s en un clon totalmente en frío (dominado por la descarga de dependencias).
+- **Mediciones:**
+  - H4: 13 s con la caché de capas; ≈ 100 s en frío.
+  - Ahora: 39 s con la caché de capas invalidada y el *cache mount* disponible.
+  - `--no-cache` también descarta el *cache mount*, así que mide el caso totalmente en frío. Con la red lenta del día tardó 717–1150 s.
+
 ## 2026-10-08 — H4: envío de extremo a extremo
 
 - **Hecho:**
