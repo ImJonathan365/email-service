@@ -102,14 +102,14 @@ class QueueRepository {
 
 	/** The pinned version's content and the tenant settings a send needs (AC-12.2). */
 	record SendContext(String subjectTemplate, String htmlTemplate, String textTemplate, String variablesSchema,
-			String timezone, boolean tenantHeld, boolean storeRenderedContent) {
+			String timezone, boolean tenantHeld, boolean storeRenderedContent, String tenantSlug) {
 	}
 
 	SendContext context(UUID tenantId, UUID templateVersionId) {
 		return jdbc.sql("""
 				SELECT v.subject_template, v.html_template, v.text_template, v.variables_schema::text AS schema,
 				       t.timezone, (t.status <> 'ACTIVE' OR t.sending_paused_at IS NOT NULL) AS held,
-				       t.store_rendered_content
+				       t.store_rendered_content, t.slug
 				FROM template_version v JOIN tenant t ON t.id = v.tenant_id
 				WHERE v.tenant_id = :tenantId AND v.id = :versionId
 				""")
@@ -117,7 +117,7 @@ class QueueRepository {
 			.param("versionId", templateVersionId)
 			.query((rs, row) -> new SendContext(rs.getString("subject_template"), rs.getString("html_template"),
 					rs.getString("text_template"), rs.getString("schema"), rs.getString("timezone"),
-					rs.getBoolean("held"), rs.getBoolean("store_rendered_content")))
+					rs.getBoolean("held"), rs.getBoolean("store_rendered_content"), rs.getString("slug")))
 			.single();
 	}
 

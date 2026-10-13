@@ -37,6 +37,15 @@ public final class EmailAddresses {
 		return domains.stream().anyMatch(allowed -> domain.equals(allowed) || domain.endsWith("." + allowed));
 	}
 
+	/** a***@example.com: how an address may appear in logs and in other tenants' views (AC-24.3). */
+	public static String masked(String address) {
+		if (address == null) {
+			return null;
+		}
+		int at = address.lastIndexOf('@');
+		return at <= 0 ? "***" : address.charAt(0) + "***" + address.substring(at);
+	}
+
 	public static boolean hasLineBreak(String value) {
 		return value != null && (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0);
 	}

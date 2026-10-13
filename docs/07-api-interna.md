@@ -405,7 +405,16 @@ svix-signature: v1,k8s9…
 
 **Levantar pausa** — `POST /admin/v1/tenants/colmena/resume-sending` `{ "note": "pico legítimo: aviso de mantenimiento" }` → `200`.
 
-**Borrado por titular** — `POST /admin/v1/data-subjects/erase` `{ "email": "ana@example.com", "reference": "ARCO-2026-014" }` → `200 { "deleted": { "email_message": 12, "email_event": 31, "email_attachment": 0 }, "suppressionsAnonymized": 1 }`.
+**Borrado por titular** — `POST /admin/v1/data-subjects/erase` `{ "email": "ana@example.com", "reference": "ARCO-2026-014" }` → `200 { "deleted": { "email_message": 12, "email_event": 31, "email_message_tag": 9 }, "copiesRemoved": 2, "suppressionsAnonymized": 1 }`.
+
+**(rev. 2026-10-12)** Detalles del borrado por titular:
+- **Contenido de la respuesta:**
+  - sin `email_attachment`, porque esa tabla no existe (ADR-0015);
+  - `email_message_tag` cuenta las filas que se fueron en cascada con los mensajes;
+  - `copiesRemoved` cuenta los mensajes de los que se quitó la dirección en `cc`/`bcc`.
+- **Comparaciones:** no distinguen mayúsculas.
+- **Idempotencia:** una segunda ejecución devuelve ceros.
+- **Validación:** `reference` es obligatoria (≤ 200 caracteres, sin saltos de línea).
 
 ## 11. Formato de error
 

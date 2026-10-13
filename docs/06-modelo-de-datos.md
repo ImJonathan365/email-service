@@ -563,3 +563,14 @@ GROUP BY 1;
 | `rate_limit_counter` | 2 días |
 | Logs (fuera de la BD) | 30 días en el destino de logs |
 | Respaldos | ≤ 35 días |
+
+**(rev. 2026-10-12) Implementado en H7 (V5):**
+- **Mensajes `QUEUED`/`SENDING`:** las purgas nunca los borran, por antiguos que sean (owner). Esto cubre, por ejemplo, la cola de un tenant pausado mucho tiempo.
+- **Final por tiempo:** `SENT` y `DELIVERED` cuentan como finales `SENT_FINAL_AFTER_HOURS` después de `sent_at`. `DELIVERED` es estable, no terminal: sin esta regla sus variables no se purgarían nunca.
+- **Borrado de un mensaje:** con él se van sus eventos, en la misma sentencia, y sus filas de `email_message_tag`, por la cascada.
+- **`audit_log`:**
+  - la función `purge_expired_audit_log(batch)` es `SECURITY DEFINER` de `email_owner`, con `search_path` fijo;
+  - solo `email_system` puede ejecutarla;
+  - como `email_owner` también está sujeto a RLS `FORCE`, la política `audit_retention` le deja ver y borrar únicamente las filas de más de 365 días;
+  - los roles de la app siguen sin `DELETE` sobre `audit_log`.
+- **Índices parciales para cada purga:** `ix_msg_purge_by_time`, `ix_msg_idempotency_age` e `ix_msg_rendered_age`, más `ix_msg_created` para la retención por tenant y las métricas por estado.

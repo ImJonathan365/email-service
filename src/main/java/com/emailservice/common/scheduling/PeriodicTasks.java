@@ -44,8 +44,8 @@ class PeriodicTasks implements SmartLifecycle {
 	public void start() {
 		scheduler = Executors.newScheduledThreadPool(1, Thread.ofVirtual().name("periodic-", 0).factory());
 		for (PeriodicTask task : tasks) {
-			long millis = task.interval().toMillis();
-			scheduler.scheduleWithFixedDelay(() -> runSafely(task), millis, millis, TimeUnit.MILLISECONDS);
+			scheduler.scheduleWithFixedDelay(() -> runSafely(task), task.initialDelay().toMillis(),
+					task.interval().toMillis(), TimeUnit.MILLISECONDS);
 		}
 	}
 

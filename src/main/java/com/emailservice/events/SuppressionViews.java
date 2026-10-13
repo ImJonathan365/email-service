@@ -43,16 +43,9 @@ final class SuppressionViews {
 	record SuppressionRow(UUID id, String scope, String email, String reason, String note, Instant createdAt) {
 	}
 
-	/** a***@example.com; an erased address (FR-29) stays hidden entirely. */
+	/** An erased address (FR-29) stays hidden entirely. */
 	static String mask(String email) {
-		if (email == null) {
-			return null;
-		}
-		int at = email.lastIndexOf('@');
-		if (at <= 0) {
-			return "***";
-		}
-		return email.charAt(0) + "***" + email.substring(at);
+		return EmailAddresses.masked(email);
 	}
 
 }

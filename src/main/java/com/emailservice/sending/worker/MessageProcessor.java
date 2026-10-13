@@ -29,6 +29,7 @@ import com.emailservice.templates.engine.TemplateEngine;
 import com.emailservice.templates.schema.SensitiveVariables;
 import com.emailservice.templates.schema.VariablesSchema;
 
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import tools.jackson.databind.JsonNode;
@@ -74,11 +75,20 @@ class MessageProcessor {
 
 	private final Alerts alerts;
 
+	private final ProviderOutcomes outcomes;
+
+	private final DistributionSummary attempts;
+
 	MessageProcessor(QueueRepository queue, EmailSender sender, TemplateEngine engine, SuppressionHashes hashes,
 			JsonMapper jsonMapper, MeterRegistry meters, AuditLog auditLog, CircuitBreaker breaker,
-			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, Alerts alerts, AppProperties properties) {
+			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, Alerts alerts, ProviderOutcomes outcomes,
+			AppProperties properties) {
 		this.messageEvents = messageEvents;
 		this.alerts = alerts;
+		this.outcomes = outcomes;
+		this.attempts = DistributionSummary.builder("email.send.attempts")
+			.description("Attempts a message took until SENT or FAILED (AC-24.2)")
+			.register(meters);
 		this.queue = queue;
 		this.sender = sender;
 		this.engine = engine;
@@ -113,12 +123,14 @@ class MessageProcessor {
 				breaker.onInconclusive();
 			}
 			MDC.remove("messageId");
+			MDC.remove("tenantSlug");
 		}
 	}
 
 	/** Returns whether the provider was called, which is what the circuit breaker learns from. */
 	private boolean doProcess(QueueRepository.Claimed message) throws InterruptedException {
 		QueueRepository.SendContext context = queue.context(message.tenantId(), message.templateVersionId());
+		MDC.put("tenantSlug", context.tenantSlug());
 		VariablesSchema schema = VariablesSchema.parse(jsonMapper.readTree(context.variablesSchema()), "variablesSchema");
 		JsonNode variables = jsonMapper.readTree(message.variables());
 		String withoutSensitive = jsonMapper.writeValueAsString(SensitiveVariables.strip(schema, variables));
@@ -169,8 +181,10 @@ class MessageProcessor {
 			return false;
 		}
 		rateLimiter.acquire();
+		Timer.Sample call = Timer.start(meters);
 		try {
 			SendResult result = sender.send(email);
+			providerCall(call, ProviderOutcomes.Outcome.SUCCESS);
 			breaker.onSuccess();
 			boolean closed = queue.markSent(message, result.provider(), result.providerMessageId(), withoutSensitive,
 					stored);
@@ -184,9 +198,24 @@ class MessageProcessor {
 			sent(message, closed);
 		}
 		catch (SendException ex) {
+			providerCall(call, switch (ex.kind()) {
+				case TRANSIENT -> ProviderOutcomes.Outcome.TRANSIENT;
+				case CONFIGURATION -> ProviderOutcomes.Outcome.CONFIGURATION;
+				case PERMANENT, TENANT_CONFIGURATION -> ProviderOutcomes.Outcome.PERMANENT;
+			});
 			onSendFailure(message, ex, withoutSensitive);
 		}
 		return true;
+	}
+
+	/** Provider latency by outcome (AC-24.2) and the last five minutes for its health indicator. */
+	private void providerCall(Timer.Sample call, ProviderOutcomes.Outcome outcome) {
+		call.stop(Timer.builder("email.provider.latency")
+			.description("Duration of a provider call")
+			.tag("provider", sender.name())
+			.tag("outcome", outcome.name())
+			.register(meters));
+		outcomes.record(outcome);
 	}
 
 	private void onSendFailure(QueueRepository.Claimed message, SendException ex, String withoutSensitive) {
@@ -196,8 +225,9 @@ class MessageProcessor {
 				// broken setup burn attempts (docs/05 §4, "Configuración").
 				breaker.onConfigurationError();
 				configurationError(ex.providerError());
-				log.error("The provider rejected our own configuration ({}); check RESEND_API_KEY and RESEND_API_URL. "
-						+ "Sending is paused by the circuit breaker", ex.providerError());
+				alerts.raise("PROVIDER_CONFIGURATION", String.valueOf(ex.providerError()), "The provider rejected our own "
+						+ "configuration (" + ex.providerError() + "); check RESEND_API_KEY and RESEND_API_URL. "
+						+ "Sending is paused by the circuit breaker");
 				close(message, queue.release(message, ex.code()));
 			}
 			case TENANT_CONFIGURATION -> {
@@ -211,7 +241,8 @@ class MessageProcessor {
 				if ("PROVIDER_IDEMPOTENCY_CONFLICT".equals(ex.code())) {
 					// Same key, different body: the render was not deterministic (AC-13.8).
 					meters.counter("email.provider.idempotency.conflict").increment();
-					log.error("Provider idempotency conflict: the same message produced a different body (AC-12.7)");
+					alerts.raise("IDEMPOTENCY_CONFLICT", message.id().toString(),
+							"Provider idempotency conflict: the same message produced a different body (AC-12.7)");
 				}
 				fail(message, ex.code(), ex.getMessage(), withoutSensitive);
 			}
@@ -272,6 +303,7 @@ class MessageProcessor {
 		boolean closed = queue.markFailed(message, code, detail, withoutSensitive);
 		close(message, closed);
 		if (closed) {
+			attempts.record(message.attempts());
 			messageEvents.checkAfterFailed(message.tenantId(), message.id(), code);
 		}
 	}
@@ -280,6 +312,7 @@ class MessageProcessor {
 	private void sent(QueueRepository.Claimed message, boolean closed) {
 		close(message, closed);
 		if (closed) {
+			attempts.record(message.attempts());
 			messageEvents.applyStoredAfterSent(message.tenantId(), message.id());
 		}
 	}
@@ -289,7 +322,8 @@ class MessageProcessor {
 		if (!closed) {
 			queue.logLostLock(message);
 			meters.counter("email.lost.lock").increment();
-			log.warn("Lost the lock of a message before closing it; leaving it to its new owner");
+			alerts.raise("LOST_LOCK", "worker",
+					"Lost the lock of a message before closing it; leaving it to its new owner");
 		}
 	}
 

@@ -24,11 +24,12 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import com.emailservice.support.IntegrationTest;
+import com.emailservice.support.IntegrationTestEnvironment;
 import com.emailservice.support.PostgresTestDatabase;
 import com.emailservice.support.PostgresTestDatabase.Role;
 
 /**
- * AC-20.2 with the reference dataset (owner, 2026-10-12): 4 M messages, 2.8 M in one tenant and
+ * AC-20.2 and AC-29.3 with the reference dataset (owner, 2026-10-12): 4 M messages, 2.8 M in one tenant and
  * 400 k in each of the other three. Measured through the API (authentication, RLS and JSON
  * included) for the large tenant. Run with ./gradlew benchmarkOperations; the report goes to
  * build/reports/operations-benchmark.txt.
@@ -100,11 +101,23 @@ class OperationsBenchmark extends IntegrationTest {
 		report.append(plan(big, "status=COMPLAINED", new EmailViews.Filter("COMPLAINED", null, null, null, null, null)));
 		report.append(plan(big, "to", new EmailViews.Filter(null, null, "user4242@example.test", null, null, null)));
 
+		// AC-29.3: erase an address that is a recipient in every tenant and a copy in others.
+		long eraseStart = System.nanoTime();
+		HttpResponse<String> erased = http().post("/admin/v1/data-subjects/erase")
+			.header("X-Admin-Key", IntegrationTestEnvironment.ADMIN_API_KEY)
+			.json("{\"email\": \"user1200@example.test\", \"reference\": \"benchmark\"}")
+			.send();
+		long eraseMillis = (System.nanoTime() - eraseStart) / 1_000_000;
+		assertThat(erased.statusCode()).as(erased.body()).isEqualTo(200);
+		report.append("\nData subject erasure (AC-29.3): ").append(eraseMillis).append(" ms, ").append(erased.body())
+			.append('\n');
+
 		Path output = Path.of("build/reports/operations-benchmark.txt");
 		Files.createDirectories(output.getParent());
 		Files.writeString(output, report);
 		System.out.println(report);
 		assertThat(p95).allSatisfy((name, value) -> assertThat(value).as(name).isLessThanOrEqualTo(P95_LIMIT_MS));
+		assertThat(eraseMillis).as("AC-29.3").isLessThan(60_000);
 	}
 
 	/**
@@ -127,10 +140,12 @@ class OperationsBenchmark extends IntegrationTest {
 						    WHERE t.tenant_id = ? AND v.locale = 'es-CR'
 						)
 						INSERT INTO email_message (id, tenant_id, template_id, template_version_id, category, priority,
-						    to_email, from_email, from_name, status, provider, provider_message_id, failure_code, tags,
+						    to_email, cc, from_email, from_name, status, provider, provider_message_id, failure_code, tags,
 						    created_at)
 						SELECT gen_random_uuid(), ?, v.template_id, v.version_id, 'TRANSACTIONAL', 1,
-						       'user' || (g % 200000) || '@example.test', 'no-reply@sender.test', 'Bench', s.status,
+						       'user' || (g % 200000) || '@example.test',
+						       CASE WHEN g % 100 = 0 THEN ARRAY['user' || (g % 4000) || '@example.test'] END,
+						       'no-reply@sender.test', 'Bench', s.status,
 						       CASE WHEN s.status <> 'FAILED' THEN 'resend' END,
 						       CASE WHEN s.status <> 'FAILED' THEN 'bench-' || gen_random_uuid() END,
 						       CASE WHEN s.status = 'FAILED' THEN 'PROVIDER_REJECTED' END,

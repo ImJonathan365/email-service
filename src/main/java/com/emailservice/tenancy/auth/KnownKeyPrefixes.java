@@ -74,7 +74,10 @@ public class KnownKeyPrefixes {
 	}
 
 	void refreshIfStale() {
-		if (Duration.between(loadedAt, clock.instant()).compareTo(REFRESH_EVERY) < 0 || !refreshing.tryLock()) {
+		Duration age = Duration.between(loadedAt, clock.instant());
+		// A clock that went backwards (an NTP step) also makes the set stale.
+		boolean fresh = !age.isNegative() && age.compareTo(REFRESH_EVERY) < 0;
+		if (fresh || !refreshing.tryLock()) {
 			return;
 		}
 		try {

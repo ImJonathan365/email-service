@@ -33,6 +33,8 @@ import com.emailservice.tenancy.AuthenticatedApiKey;
 import com.emailservice.tenancy.RequiresScope;
 import com.emailservice.tenancy.Scope;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,9 +51,12 @@ class EmailController {
 
 	private final EmailQueries queries;
 
-	EmailController(AcceptanceService acceptance, EmailQueries queries) {
+	private final MeterRegistry meters;
+
+	EmailController(AcceptanceService acceptance, EmailQueries queries, MeterRegistry meters) {
 		this.acceptance = acceptance;
 		this.queries = queries;
+		this.meters = meters;
 	}
 
 	@PostMapping
@@ -60,8 +65,13 @@ class EmailController {
 	ResponseEntity<EmailAccepted> send(@Valid @RequestBody SendEmailRequest body,
 			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
 			HttpServletRequest request) {
+		Timer.Sample accepting = Timer.start(meters);
 		AcceptanceService.Outcome outcome = acceptance.accept(AuthenticatedApiKey.from(request).tenantId(), body,
 				idempotencyKey);
+		accepting.stop(Timer.builder("email.acceptance")
+			.description("Time to validate and enqueue one message (AC-24.2)")
+			.tag("outcome", outcome.created() ? "created" : "repeat")
+			.register(meters));
 		MDC.put("messageId", outcome.body().id().toString());
 		return ResponseEntity.status(outcome.created() ? HttpStatus.ACCEPTED : HttpStatus.OK).body(outcome.body());
 	}

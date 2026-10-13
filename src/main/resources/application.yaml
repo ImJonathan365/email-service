@@ -27,6 +27,13 @@ management:
     health:
       probes:
         enabled: true
+      # Component names and statuses (queue, provider, db) are shown; their details stay hidden.
+      show-components: always
+      # AC-24.4: a slow queue or provider degrades /actuator/health but answers 200.
+      status:
+        order: down, out-of-service, degraded, up, unknown
+        http-mapping:
+          degraded: 200
       group:
         # AC-24.1: liveness never depends on anything external, readiness only on the database.
         liveness:
@@ -89,6 +96,10 @@ app:
     max-attempts: ${MAX_ATTEMPTS:6}
     retry-backoff-seconds: ${RETRY_BACKOFF_SECONDS:60,300,900,3600,21600}
     lock-timeout-seconds: ${LOCK_TIMEOUT_SECONDS:60}
+    variables-retention-days: ${VARIABLES_RETENTION_DAYS:7}
+    idempotency-retention-hours: ${IDEMPOTENCY_RETENTION_HOURS:24}
+    sent-final-after-hours: ${SENT_FINAL_AFTER_HOURS:72}
+    queue-age-alert-seconds: ${QUEUE_AGE_ALERT_SECONDS:300}
   provider:
     resend-api-key: ${RESEND_API_KEY:}
     resend-api-url: ${RESEND_API_URL:https://api.resend.com}

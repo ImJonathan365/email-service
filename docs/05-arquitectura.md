@@ -201,6 +201,22 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 - **Tareas periódicas del worker:** `PeriodicTasks` las ejecuta en hilos virtuales, cada una con su intervalo. El barrido de locks sigue en el bucle de la cola.
 - **Alertas:** líneas de log ERROR con los campos `alert` y `alertSubject`, deduplicadas 15 min por instancia (owner). La lista completa de alertas llega con la parte 3.
 
+**(rev. 2026-10-12) Comportamiento implementado en H7, parte 3:**
+- **Health:**
+  - indicador `queue` (todos los roles): `DEGRADED` con HTTP 200 por encima de `QUEUE_AGE_ALERT_SECONDS`; no cuenta los tenants retenidos;
+  - indicador `provider` (worker): resultados de los últimos 5 min sin *ping*. `DOWN` con el breaker abierto o tras un error de configuración; `DEGRADED` si al menos la mitad de 5 o más llamadas fallaron de forma transitoria;
+  - ninguno de los dos forma parte de las sondas;
+  - se muestran los componentes, no sus detalles.
+- **Métricas nuevas (AC-24.2):**
+  - `email_messages{status}` (últimas 24 h);
+  - `email_queue_depth`, `email_queue_oldest_seconds` y `email_queue_held{tenant}`;
+  - `email_acceptance_seconds` y `email_provider_latency_seconds{provider,outcome}`;
+  - `email_send_attempts` (intentos hasta `SENT` o `FAILED`);
+  - `email_tenant_bounce_rate{tenant}` y `email_tenant_complaint_rate{tenant}`;
+  - `email_purged_rows_total{data}`.
+- **Alertas** (README, "Alertas"): `QUEUE_AGE`, `FAILED_RATE`, `TENANT_PAUSED`, `CIRCUIT_BREAKER_OPEN`, `LOST_LOCK`, `IDEMPOTENCY_CONFLICT`, `COMPLAINT_RATE`, `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`.
+- **Logs (AC-24.3):** el worker y los webhooks añaden `tenantSlug` y `messageId` al MDC. `EmailAddresses.masked` es la única forma admitida de mostrar una dirección; hoy ninguna línea de log la necesita.
+
 **Salvaguardas anti-duplicados (rev. 2026-10):**
 1. `Idempotency-Key = message.id` hacia el proveedor (deduplicación de 24 h).
 2. Cierre con `lock_token`: un worker que perdió el lock no cierra ni reintenta.
@@ -216,6 +232,14 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `purgeExpiredData` | Diaria | Retención por tenant (mensajes, eventos, contenido renderizado, huérfanos) |
 | `purgeIdempotencyKeys` | Horaria | Claves de idempotencia vencidas |
 | `emitQueueMetrics` | 30 s | Profundidad, antigüedad y mensajes retenidos |
+
+**(rev. 2026-10-12)** H7 completa la tabla con `PeriodicTasks`:
+- **`purgeVariables`** cada 15 min y **`purgeIdempotencyKeys`** cada hora.
+- **`purgeExpiredData`** diaria. Empieza 10 min después del arranque, para que despliegues frecuentes no la dejen sin ejecutar.
+- **`emitQueueMetrics`** cada 30 s: gauges, y alertas `QUEUE_AGE` y `FAILED_RATE`.
+- **`detectAnomalies`** cada 5 min.
+- **`providerAlerts`** cada 30 s: breaker abierto más de 10 min.
+- **Purgas en lotes:** 5 000 filas por lote, cada lote en su propia transacción con el advisory lock de la tarea.
 
 **(rev. 2026-10-07)** En H4 existe `reclaimStuckMessages`; las demás tareas llegan con sus hitos. Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisory_xact_lock(hashtext('<tarea>'))`: si otra instancia la tiene, se salta esa vuelta. **(rev. 2026-10)** Se elimina la tabla `scheduled_lock`. No se añade Quartz ni ShedLock.
 
@@ -250,8 +274,8 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `DEFAULT_RATE_LIMIT_PER_MINUTE` | `60` | Por tenant |
 | `DEFAULT_DAILY_QUOTA` | `1000` | Por tenant (fijar ~3× el volumen esperado) |
 | `DEFAULT_RETENTION_DAYS` | `90` | Por tenant |
-| `VARIABLES_RETENTION_DAYS` | `7` | Tras el estado final (AC-23.5) |
-| `IDEMPOTENCY_RETENTION_HOURS` | `24` | AC-08.5 |
+| `VARIABLES_RETENTION_DAYS` | `7` | Tras el estado final (AC-23.5). **(rev. 2026-10-12)** De 1 a 90 |
+| `IDEMPOTENCY_RETENTION_HOURS` | `24` | AC-08.5. **(rev. 2026-10-12)** Al menos 24: una repetición dentro de la ventana debe encontrar su mensaje |
 | `SENT_FINAL_AFTER_HOURS` | `72` | `SENT` sin eventos = final por tiempo |
 | `MAX_REQUEST_BYTES` | `262144` | Tamaño de payload |
 | `MAX_BATCH_ITEMS` / `MAX_BATCH_BYTES` | `100` / `1048576` | Endpoint de lote |
@@ -260,7 +284,7 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `SUPPRESSION_REJECT_MODE` | `accept` | `accept` (202 + `FAILED`) \| `reject` (422) |
 | `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria). **(rev. 2026-10-07)** ≥ 32 caracteres; se exige en todos los roles salvo `migrate` |
 | `ALLOWED_RECIPIENT_DOMAINS` | *(vacío)* | Allowlist de destino; **obligatoria** en `staging` |
-| `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta |
+| `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta. **(rev. 2026-10-12)** Al menos 30 |
 | `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34. **(rev. 2026-10-12)** Valores por defecto de cada tenant. `anomalyOverrides` puede cambiar el multiplicador y subir el mínimo horario, nunca bajarlo |
 | `BOUNCE_PAUSE_RATE` / `COMPLAINT_PAUSE_RATE` | `0.04` / `0.001` | FR-34; ajustables por tenant con `anomalyOverrides`. Ambos entre 0 y 1 |
 
