@@ -52,6 +52,120 @@
         "required" : [ "category", "key", "name" ],
         "type" : "object"
       },
+      "Detail" : {
+        "properties" : {
+          "attempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "bcc" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "cc" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "clickCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deliveredAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "events" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Event"
+            },
+            "type" : "array"
+          },
+          "failureCode" : {
+            "type" : "string"
+          },
+          "failureDetail" : {
+            "type" : "string"
+          },
+          "firstClickedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "firstOpenedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lastError" : {
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "metadata" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "openCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "providerMessageId" : {
+            "type" : "string"
+          },
+          "renderedHtml" : {
+            "type" : "string"
+          },
+          "renderedSubject" : {
+            "type" : "string"
+          },
+          "renderedText" : {
+            "type" : "string"
+          },
+          "sentAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "templateKey" : {
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "EmailAccepted" : {
         "properties" : {
           "createdAt" : {
@@ -93,6 +207,18 @@
         },
         "type" : "object"
       },
+      "Event" : {
+        "properties" : {
+          "occurredAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "JointPublishRequest" : {
         "properties" : {
           "versions" : {
@@ -118,6 +244,99 @@
               "$ref" : "#/components/schemas/VersionPublished"
             },
             "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "JsonNode" : {
+        "properties" : {
+          "array" : {
+            "type" : "boolean"
+          },
+          "bigDecimal" : {
+            "type" : "boolean"
+          },
+          "bigInteger" : {
+            "type" : "boolean"
+          },
+          "binary" : {
+            "type" : "boolean"
+          },
+          "boolean" : {
+            "type" : "boolean"
+          },
+          "container" : {
+            "type" : "boolean"
+          },
+          "double" : {
+            "type" : "boolean"
+          },
+          "embeddedValue" : {
+            "type" : "boolean"
+          },
+          "empty" : {
+            "type" : "boolean"
+          },
+          "float" : {
+            "type" : "boolean"
+          },
+          "floatingPointNumber" : {
+            "type" : "boolean"
+          },
+          "int" : {
+            "type" : "boolean"
+          },
+          "integralNumber" : {
+            "type" : "boolean"
+          },
+          "long" : {
+            "type" : "boolean"
+          },
+          "missingNode" : {
+            "type" : "boolean"
+          },
+          "nodeType" : {
+            "enum" : [ "ARRAY", "BINARY", "BOOLEAN", "MISSING", "NULL", "NUMBER", "OBJECT", "POJO", "STRING" ],
+            "type" : "string"
+          },
+          "null" : {
+            "type" : "boolean"
+          },
+          "number" : {
+            "type" : "boolean"
+          },
+          "object" : {
+            "type" : "boolean"
+          },
+          "pojo" : {
+            "type" : "boolean"
+          },
+          "short" : {
+            "type" : "boolean"
+          },
+          "string" : {
+            "type" : "boolean"
+          },
+          "textual" : {
+            "deprecated" : true,
+            "type" : "boolean"
+          },
+          "valueNode" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "ListResponseSummary" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Summary"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
           }
         },
         "type" : "object"
@@ -287,6 +506,28 @@
           }
         },
         "required" : [ "templateKey", "to", "variables" ],
+        "type" : "object"
+      },
+      "Summary" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "templateKey" : {
+            "type" : "string"
+          },
+          "to" : {
+            "type" : "string"
+          }
+        },
         "type" : "object"
       },
       "Template" : {
@@ -540,6 +781,96 @@
   "openapi" : "3.1.0",
   "paths" : {
     "/v1/emails" : {
+      "get" : {
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "pattern" : "QUEUED|SENDING|SENT|DELIVERED|BOUNCED|COMPLAINED|FAILED|CANCELED",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "templateKey",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "tag",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "createdAfter",
+          "required" : false,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "createdBefore",
+          "required" : false,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "List messages, newest first, with filters and a cursor (FR-20)",
+        "tags" : [ "Emails" ]
+      },
       "post" : {
         "operationId" : "send",
         "parameters" : [ {
@@ -576,6 +907,37 @@
           "apiKey" : [ ]
         } ],
         "summary" : "Send a transactional email: 202 when queued, 200 for an idempotent repeat (FR-07, FR-08)",
+        "tags" : [ "Emails" ]
+      }
+    },
+    "/v1/emails/{id}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "State, attempts and event history of one message (FR-19)",
         "tags" : [ "Emails" ]
       }
     },

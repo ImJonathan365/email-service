@@ -7,6 +7,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,7 +24,7 @@ import com.emailservice.support.TenantFixture;
 class RowLevelSecurityTest {
 
 	static final List<String> TENANT_SCOPED_TABLES = List.of("tenant", "api_key", "template",
-			"template_version", "email_message", "email_event", "audit_log", "rate_limit_counter");
+			"template_version", "email_message", "email_message_tag", "email_event", "audit_log", "rate_limit_counter");
 
 	static TenantFixture tenantA;
 	static TenantFixture tenantB;
@@ -42,6 +43,24 @@ class RowLevelSecurityTest {
 	void appRoleWithoutTenantContextSeesNoRows(String table) throws SQLException {
 		try (Connection app = PostgresTestDatabase.connect(Role.APP)) {
 			assertThat(count(app, "SELECT count(*) FROM " + table)).isZero();
+		}
+	}
+
+	/** A table added later cannot forget RLS: every table with a tenant_id column forces it. */
+	@Test
+	void everyTableWithATenantColumnForcesRowLevelSecurity() throws SQLException {
+		try (Connection owner = PostgresTestDatabase.connect(Role.OWNER);
+				var rs = owner.createStatement().executeQuery("""
+						SELECT c.relname FROM pg_class c
+						JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+						JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
+						WHERE c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity)
+						""")) {
+			List<String> unprotected = new ArrayList<>();
+			while (rs.next()) {
+				unprotected.add(rs.getString(1));
+			}
+			assertThat(unprotected).isEmpty();
 		}
 	}
 

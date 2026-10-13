@@ -2,6 +2,25 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-12 — H7, parte 1: consultas
+
+- **Hecho:**
+  - **`GET /v1/emails/{id}`** (FR-19):
+    - estado, plantilla y versión, `locale`, destinatarios, intentos, `providerMessageId`, marcas de tiempo, `lastError` y el historial de eventos;
+    - `404` para otro tenant.
+  - **Contenido renderizado:** con `storeRenderedContent`, el worker guarda una segunda renderización con las variables `x-sensitive` como `[REDACTED]` (AC-19.3).
+  - **`GET /v1/emails`** (FR-20): filtros `status`, `templateKey`, `to`, `tag`, `createdAfter` y `createdBefore`, con cursor opaco.
+  - **AC-20.2 medido:** `./gradlew benchmarkOperations`, con el dataset de referencia definido por el owner (4 M mensajes, 2,8 M en un tenant y 400 k en cada uno de los otros tres), a través de la API.
+    - p95 entre 6 y 13 ms en los 14 casos, incluidos un tag inexistente y una dirección sin mensajes.
+    - Hallazgo: con RLS, PostgreSQL solo usa un índice para condiciones *leakproof*. `lower()` y `@>` no lo son, y el filtro `to` hacía un recorrido secuencial (p95 990 ms).
+    - V4 lo resuelve con la columna generada `to_email_lower`, la tabla `email_message_tag` (llenada por trigger y con RLS `FORCE`) e índices con desempate por `id`.
+  - **Tests nuevos:**
+    - un test de catálogo exige RLS `FORCE` en toda tabla con `tenant_id`;
+    - el test del rol `migrate` cuenta los archivos de migración en lugar de un número fijo.
+  - **Errores de parámetros:** un parámetro de query mal formado responde `422`. Un segmento de ruta mal formado sigue respondiendo `404`.
+  - **`WebhookDatabaseFailureTest`** queda `@Isolated`.
+  - **docs/02 AC-20.2:** corregida la definición del dataset.
+
 ## 2026-10-11 — Tests: un solo contexto de Spring compartido
 
 - **Hecho:**
