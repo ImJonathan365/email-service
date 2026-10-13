@@ -34,6 +34,8 @@ public final class IntegrationTestEnvironment {
 		registry.add("app.provider.webhook-signing-secrets", () -> WEBHOOK_SECRET);
 		// No mail server in tests; sending tests install their own recording sender.
 		registry.add("app.mail.provider", () -> "noop");
+		// Many tests answer 401 from 127.0.0.1; the per-IP limit is exercised with its own addresses.
+		registry.add("app.http.auth-failures-per-minute-per-ip", () -> "1000");
 		// Small pools: a test drives one request or one worker pass at a time.
 		registry.add("app.db.tenant-pool-size", () -> "5");
 		registry.add("app.db.system-pool-size", () -> "3");

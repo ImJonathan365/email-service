@@ -32,7 +32,7 @@ Reglas:
 - **Comparación en tiempo constante** (`MessageDigest.isEqual`), nunca `String.equals`.
 - El prefijo permite identificar una clave filtrada en un log o repositorio sin exponer el secreto.
 - ~~Caché en memoria de las claves validadas con TTL ≤ 60 s~~ **(rev. 2026-10-06, ADR-0019)** Sin caché: el lookup por prefijo es una lectura indexada por petición (barata a este volumen) y la revocación es inmediata, más estricto que AC-03.4. Se añadiría una caché (TTL ≤ 60 s) solo si la latencia de autenticación lo justifica con una medida.
-- **(rev. 2026-10-06)** Los fallos con una key ausente, mal formada o desconocida no se auditan uno a uno (permitiría inundar `audit_log`): se cuentan en la métrica `email_auth_unauthenticated_total{reason=missing|malformed|unknown_key}`, sin escribir en la BD. La auditoría agregada por IP y el rate limit de `401` llegan con H7. Sí se auditan los rechazos de keys conocidas: revocada, expirada, fuera de `allowedCidrs` o de un tenant suspendido.
+- **(rev. 2026-10-06)** Los fallos con una key ausente, mal formada o desconocida no se auditan uno a uno (permitiría inundar `audit_log`): se cuentan en la métrica `email_auth_unauthenticated_total{reason=missing|malformed|unknown_key}`, sin escribir en la BD. **(rev. 2026-10-12)** La auditoría agregada por IP y el rate limit de `401` se describen en §4. Sí se auditan los rechazos de keys conocidas: revocada, expirada, fuera de `allowedCidrs` o de un tenant suspendido.
 - **Ámbitos** (`emails:send`, `emails:read`, `templates:write`, `suppressions:write`): la key desplegada en un producto solo lleva `emails:send` y `emails:read` (FR-33).
 - **Origen:** `allowedCidrs` por key cuando el hosting da IP de salida estables.
 
@@ -77,8 +77,22 @@ Reglas:
 | Abuso de la cola (payloads enormes) | `MAX_REQUEST_BYTES`, límites de `metadata` (4 KB), `tags` (10), `cc`/`bcc` (5) y lotes |
 | Rebotes y quejas que dañan la reputación | Supresión **global** automática (ADR-0012); tasas por tenant; pausa al superar el 4 % de rebotes o el 0,1 % de quejas |
 | Reproducción de webhooks | Firma Svix sobre el cuerpo crudo + ventana ±5 min + dedupe por `svix-id` |
-| Fuerza bruta de API keys | Claves de 256 bits (inviable); rate limit por IP en `401` repetidos (en memoria por instancia) y auditoría agregada |
+| Fuerza bruta de API keys | Claves de 256 bits (inviable); rate limit por IP en `401` repetidos (en memoria por instancia) y auditoría agregada. **(rev. 2026-10-12)** Detalle debajo de la tabla |
 | Fuga entre tenants por un error de código | RLS *fail-closed* + FK compuestas (ADR-0008) |
+
+**(rev. 2026-10-12, owner) `401` repetidos por IP.** Varios productos pueden salir por la misma IP (el mismo servidor), y uno mal configurado no debe bloquear a los demás.
+- **Prefijos conocidos:** cada instancia de la API mantiene en memoria los prefijos de las API keys activas (no son secretos).
+  - Se refrescan como mucho cada 60 s y al instante cuando esa instancia emite o revoca una key.
+  - Hasta la primera carga el conjunto se considera desconocido y todas las peticiones van a la BD.
+- **Umbral:** una IP que supera `AUTH_FAILURES_PER_MINUTE_PER_IP` fallos de autenticación (`401`) en el minuto en curso (default 30, ventana fija por instancia) queda limitada.
+  - Recibe `429 RATE_LIMITED`, con `Retry-After` hasta el fin del minuto, **solo** en las peticiones con key ausente, mal formada o con un prefijo que no está en el conjunto.
+  - Esas se rechazan **sin tocar la BD**; lo verifica la métrica `email_auth_key_lookups_total`.
+- **Prefijo conocido:** sigue la autenticación normal contra la BD aunque la IP esté por encima del umbral. Por eso:
+  - otro producto con una key válida detrás de la misma IP sigue funcionando;
+  - la revocación sigue siendo inmediata: una key recién revocada recibe `401` aunque su prefijo siga en el conjunto hasta el siguiente refresco.
+- **Key emitida en otra instancia:** como mucho durante 60 s, una IP limitada recibe `429` también con esa key.
+- **Auditoría:** una fila `AUTHENTICATION_FAILURES_BY_IP` por IP y hora, con el umbral; nunca una por fallo.
+- **Métricas:** `email_auth_ip_limited_total` cuenta los `429`; `email_auth_unauthenticated_total{reason}` sigue contando los `401` sin key conocida.
 
 **Envío a direcciones reales desde entornos no productivos:** `ALLOWED_RECIPIENT_DOMAINS` es **obligatoria** en `staging`; en `local` el proveedor por defecto es Mailpit, que no entrega nada al exterior. Staging usa una cuenta de proveedor distinta de producción.
 

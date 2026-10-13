@@ -38,7 +38,14 @@ class ApiExceptionHandler {
 
 	@ExceptionHandler(ApiException.class)
 	ResponseEntity<Problem> api(ApiException ex, HttpServletRequest request) {
-		return problems.entity(request, ex.code(), ex.getMessage(), ex.errors());
+		ResponseEntity<Problem> entity = problems.entity(request, ex.code(), ex.getMessage(), ex.errors());
+		if (ex.retryAfterSeconds() == null) {
+			return entity;
+		}
+		return ResponseEntity.status(entity.getStatusCode())
+			.headers(entity.getHeaders())
+			.header("Retry-After", String.valueOf(ex.retryAfterSeconds()))
+			.body(entity.getBody());
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

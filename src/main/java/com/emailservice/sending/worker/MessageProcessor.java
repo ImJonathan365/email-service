@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import com.emailservice.audit.Actor;
 import com.emailservice.audit.AuditAction;
 import com.emailservice.audit.AuditLog;
+import com.emailservice.common.alert.Alerts;
 import com.emailservice.common.config.AppProperties;
 import com.emailservice.common.config.RoleConditions.ConditionalOnWorkerRole;
 import com.emailservice.events.MessageEvents;
@@ -71,10 +72,13 @@ class MessageProcessor {
 
 	private final MessageEvents messageEvents;
 
+	private final Alerts alerts;
+
 	MessageProcessor(QueueRepository queue, EmailSender sender, TemplateEngine engine, SuppressionHashes hashes,
 			JsonMapper jsonMapper, MeterRegistry meters, AuditLog auditLog, CircuitBreaker breaker,
-			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, AppProperties properties) {
+			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, Alerts alerts, AppProperties properties) {
 		this.messageEvents = messageEvents;
+		this.alerts = alerts;
 		this.queue = queue;
 		this.sender = sender;
 		this.engine = engine;
@@ -255,8 +259,8 @@ class MessageProcessor {
 			auditLog.record(queue.jdbc(), WORKER, AuditAction.TENANT_PAUSED, message.tenantId(), "tenant",
 					message.tenantId().toString(), Map.of("reason", "PROVIDER_DOMAIN"));
 			configurationError("domain_not_verified");
-			log.error("The provider reports the tenant's sender domain as unverified; the tenant is paused "
-					+ "(PROVIDER_DOMAIN) until it is resumed through the admin API");
+			alerts.raise("TENANT_PAUSED", message.tenantId().toString(), "The provider reports the tenant's sender "
+					+ "domain as unverified; the tenant is paused (PROVIDER_DOMAIN) until it is resumed through the admin API");
 		}
 	}
 

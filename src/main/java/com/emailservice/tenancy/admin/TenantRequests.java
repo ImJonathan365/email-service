@@ -2,6 +2,9 @@ package com.emailservice.tenancy.admin;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -56,7 +59,18 @@ final class TenantRequests {
 			@Positive Integer dailyQuota,
 			@Min(7) @Max(400) Integer retentionDays,
 			Boolean storeRenderedContent,
-			@Schema(allowableValues = { "ACTIVE", "SUSPENDED" }) @Pattern(regexp = "ACTIVE|SUSPENDED") String status) {
+			@Schema(allowableValues = { "ACTIVE", "SUSPENDED" }) @Pattern(regexp = "ACTIVE|SUSPENDED") String status,
+			@Valid AnomalyOverrides anomalyOverrides) {
+	}
+
+	/**
+	 * Per-tenant anomaly thresholds (AC-34.5); a null field keeps the service default. minHourly
+	 * can only raise the configured minimum: the detector never pauses below it.
+	 */
+	record AnomalyOverrides(@DecimalMin("1.0") @DecimalMax("100.0") Double volumeMultiplier,
+			@Min(1) @Max(1_000_000) Integer minHourly,
+			@DecimalMin(value = "0.0", inclusive = false) @DecimalMax(value = "1.0", inclusive = false) Double bouncePauseRate,
+			@DecimalMin(value = "0.0", inclusive = false) @DecimalMax(value = "1.0", inclusive = false) Double complaintPauseRate) {
 	}
 
 }

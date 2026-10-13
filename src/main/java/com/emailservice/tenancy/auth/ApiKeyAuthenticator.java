@@ -27,6 +27,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 /**
  * Resolves the Authorization header to a tenant (FR-01, FR-33). Every failure on an unknown or
  * malformed key returns the same 401, so a response never tells whether a key exists (AC-01.2).
+ * An IP past AUTH_FAILURES_PER_MINUTE_PER_IP gets 429, without a database lookup, for requests
+ * whose key is missing, malformed or of an unknown prefix; a known prefix is always checked in
+ * full, so one misconfigured product cannot lock out the others behind the same IP (docs/08 §4).
  */
 @Component
 class ApiKeyAuthenticator {
@@ -41,23 +44,52 @@ class ApiKeyAuthenticator {
 
 	private final MeterRegistry meterRegistry;
 
-	ApiKeyAuthenticator(ApiKeyLookup lookup, AuditLog auditLog, MeterRegistry meterRegistry) {
+	private final KnownKeyPrefixes knownPrefixes;
+
+	private final AuthFailuresByIp failures;
+
+	ApiKeyAuthenticator(ApiKeyLookup lookup, AuditLog auditLog, MeterRegistry meterRegistry,
+			KnownKeyPrefixes knownPrefixes, AuthFailuresByIp failures) {
 		this.lookup = lookup;
 		this.auditLog = auditLog;
 		this.meterRegistry = meterRegistry;
+		this.knownPrefixes = knownPrefixes;
+		this.failures = failures;
 	}
 
 	AuthenticatedApiKey authenticate(String authorization, InetAddress clientIp, String requestId) {
+		String ip = clientIp.getHostAddress();
+		Optional<ApiKeyFormat.Parsed> parsed = bearerToken(authorization).flatMap(ApiKeyFormat::parse);
+		boolean knownPrefix = parsed.isPresent() && knownPrefixes.mightBeActive(parsed.get().keyPrefix());
+		if (!knownPrefix && failures.overThreshold(ip)) {
+			meterRegistry.counter("email.auth.ip.limited").increment();
+			throw ApiException.rateLimited("Too many failed authentications from this address.",
+					failures.untilNextWindow());
+		}
+		try {
+			return authenticate(authorization, parsed, clientIp, requestId);
+		}
+		catch (ApiException ex) {
+			if (ex.code() == ErrorCode.UNAUTHENTICATED && failures.recordFailure(ip) && failures.firstTimeThisHour(ip)) {
+				// One aggregated row per IP and hour, never one per failure (docs/08 §7).
+				auditLog.record(lookup.jdbc(), new Actor(Actor.Type.SYSTEM, "authentication", ip, requestId),
+						AuditAction.AUTHENTICATION_FAILURES_BY_IP, null, "ip", ip,
+						Map.of("threshold", failures.threshold(), "window", "1 minute"));
+			}
+			throw ex;
+		}
+	}
+
+	private AuthenticatedApiKey authenticate(String authorization, Optional<ApiKeyFormat.Parsed> parsed,
+			InetAddress clientIp, String requestId) {
 		if (authorization == null) {
 			throw unknown("missing");
 		}
-		ApiKeyFormat.Parsed presented = bearerToken(authorization).flatMap(ApiKeyFormat::parse)
-			.orElseThrow(() -> unknown("malformed"));
+		ApiKeyFormat.Parsed presented = parsed.orElseThrow(() -> unknown("malformed"));
 		ApiKeyLookup.KeyRow key = lookup.findByPrefix(presented.keyPrefix())
 			.filter(row -> MessageDigest.isEqual(row.keyHash(), ApiKeyFormat.hash(presented.secret())))
-			// TODO(owner-decision): failures on unknown keys are only counted, not audited one by one
-			// (that would let anyone flood audit_log); per-IP aggregation and the 401 rate limit of
-			// docs/08 §4/§7 come with the rest of rate limiting in H7.
+			// Unknown keys are counted, and aggregated per IP above, never audited one by one: that
+			// would let anyone flood audit_log.
 			.orElseThrow(() -> unknown("unknown_key"));
 
 		Actor actor = new Actor(Actor.Type.API_KEY, key.id().toString(), clientIp.getHostAddress(), requestId);

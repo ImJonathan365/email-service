@@ -184,6 +184,23 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
   - `email_suppressions_created_total{reason}`.
 - **Fuera de H6:** la purga de huérfanos a los 30 días (AC-16.5, tarea `purgeExpiredData`) y el historial de eventos en `GET /v1/emails/{id}` (H7).
 
+**(rev. 2026-10-12) Comportamiento implementado en H7, parte 2:**
+- **Rate limit y cuota** (FR-21):
+  - el contador `rate_limit_counter` se incrementa en la transacción del `INSERT`, después de las validaciones;
+  - la ventana `MINUTE` es UTC y la `DAY` sigue el calendario del tenant (`timezone`);
+  - al superarse, `429 RATE_LIMITED` con `Retry-After` hasta el fin de la ventana; el rollback deshace el incremento, así que el rechazo no consume cuota;
+  - los límites se leen en cada petición, así que un `PATCH` aplica sin redesplegar;
+  - auditoría agregada: una fila `TENANT_RATE_LIMITED` por tenant, ventana y hora (owner), en su propia transacción;
+  - métrica `email_rate_limited_total{tenant,window}`.
+- **`detectAnomalies`** (FR-34), tarea del worker cada 5 min bajo advisory lock, sobre `created_at`:
+  - **volumen:** aceptados en los últimos 60 min contra `max(multiplicador × p95 horario de los 14 días anteriores, mínimo horario)`, contando como cero las horas sin mensajes;
+  - **rebotes:** `BOUNCED / (SENT + DELIVERED + BOUNCED + COMPLAINED)` de 24 h, con ≥ 200 de esos resultados;
+  - **quejas:** `COMPLAINED / (DELIVERED + COMPLAINED)` de 7 días con ≥ 1 000 entregados, o 3 quejas en 24 h;
+  - orden de prioridad: quejas, rebotes, volumen;
+  - al pausar: auditoría `TENANT_PAUSED` (SYSTEM, con lo observado y el umbral), métrica `email_tenant_paused_total{reason}` y alerta `TENANT_PAUSED`.
+- **Tareas periódicas del worker:** `PeriodicTasks` las ejecuta en hilos virtuales, cada una con su intervalo. El barrido de locks sigue en el bucle de la cola.
+- **Alertas:** líneas de log ERROR con los campos `alert` y `alertSubject`, deduplicadas 15 min por instancia (owner). La lista completa de alertas llega con la parte 3.
+
 **Salvaguardas anti-duplicados (rev. 2026-10):**
 1. `Idempotency-Key = message.id` hacia el proveedor (deduplicación de 24 h).
 2. Cierre con `lock_token`: un worker que perdió el lock no cierra ni reintenta.
@@ -214,6 +231,7 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `DB_OWNER_USER` / `DB_OWNER_PASSWORD` | — | Rol `email_owner`, solo con `APP_ROLE=migrate` |
 | `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default). **(rev. 2026-10-06)** Solo se exige con `APP_ROLE=api\|all` (el worker y `migrate` nunca la reciben); cada una de ≥ 32 caracteres |
 | `TRUSTED_PROXIES` | *(vacío)* | CIDR de proxies cuya `X-Forwarded-For` se acepta |
+| `AUTH_FAILURES_PER_MINUTE_PER_IP` | `30` | **(rev. 2026-10-12)** Fallos de autenticación por IP y minuto antes de limitar a esa IP las peticiones sin prefijo de key conocido (`08` §4) |
 | `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
 | `RESEND_API_KEY` | — | Secreto; **obligatoria** con `MAIL_PROVIDER=resend` (rev. 2026-10-10). Nunca se registra en logs |
 | `RESEND_API_URL` | `https://api.resend.com` | (rev. 2026-10-10) Base de la API; debe ser `https` salvo con `APP_ENV=local` (pruebas contra un stub) |
@@ -243,8 +261,8 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria). **(rev. 2026-10-07)** ≥ 32 caracteres; se exige en todos los roles salvo `migrate` |
 | `ALLOWED_RECIPIENT_DOMAINS` | *(vacío)* | Allowlist de destino; **obligatoria** en `staging` |
 | `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta |
-| `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34 |
-| `BOUNCE_PAUSE_RATE` / `COMPLAINT_PAUSE_RATE` | `0.04` / `0.001` | FR-34 |
+| `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34. **(rev. 2026-10-12)** Valores por defecto de cada tenant. `anomalyOverrides` puede cambiar el multiplicador y subir el mínimo horario, nunca bajarlo |
+| `BOUNCE_PAUSE_RATE` / `COMPLAINT_PAUSE_RATE` | `0.04` / `0.001` | FR-34; ajustables por tenant con `anomalyOverrides`. Ambos entre 0 y 1 |
 
 Ninguna credencial vive en la base de datos ni en el repositorio (`08-seguridad.md`). La configuración se valida al arrancar (NFR-09).
 

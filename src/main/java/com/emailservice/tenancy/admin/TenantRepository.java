@@ -13,6 +13,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import com.emailservice.common.persistence.SystemDataSource;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import tools.jackson.databind.json.JsonMapper;
 
 /** Tenant rows through email_system: administration spans tenants by definition (ADR-0008). */
 @Repository
@@ -21,13 +24,17 @@ class TenantRepository {
 	private static final String COLUMNS = """
 			id, slug, name, status, from_email, from_name, reply_to, allowed_from_domains, allowed_link_hosts,
 			locale, timezone, rate_limit_per_minute, daily_quota, retention_days, store_rendered_content,
-			sending_paused_at, pause_reason, created_at, updated_at
+			sending_paused_at, pause_reason, anomaly_overrides::text AS anomaly_overrides, created_at, updated_at
 			""";
 
 	private final JdbcClient jdbc;
 
-	TenantRepository(@SystemDataSource JdbcClient jdbc) {
+	private final JsonMapper jsonMapper;
+
+	TenantRepository(@SystemDataSource JdbcClient jdbc, JsonMapper jsonMapper) {
 		this.jdbc = jdbc;
+		this.jsonMapper = jsonMapper.rebuild().changeDefaultPropertyInclusion(
+				include -> include.withValueInclusion(JsonInclude.Include.NON_NULL)).build();
 	}
 
 	JdbcClient jdbc() {
@@ -58,18 +65,18 @@ class TenantRepository {
 			.param("dailyQuota", tenant.dailyQuota())
 			.param("retentionDays", tenant.retentionDays())
 			.param("storeRendered", tenant.storeRenderedContent())
-			.query(TenantRepository::map)
+			.query(this::map)
 			.single();
 	}
 
 	List<TenantView> findAll() {
-		return jdbc.sql("SELECT " + COLUMNS + " FROM tenant ORDER BY slug").query(TenantRepository::map).list();
+		return jdbc.sql("SELECT " + COLUMNS + " FROM tenant ORDER BY slug").query(this::map).list();
 	}
 
 	Optional<TenantView> findBySlugForUpdate(String slug) {
 		return jdbc.sql("SELECT " + COLUMNS + " FROM tenant WHERE slug = :slug FOR UPDATE")
 			.param("slug", slug)
-			.query(TenantRepository::map)
+			.query(this::map)
 			.optional();
 	}
 
@@ -93,6 +100,7 @@ class TenantRepository {
 				    retention_days = coalesce(:retentionDays, retention_days),
 				    store_rendered_content = coalesce(:storeRendered, store_rendered_content),
 				    status = coalesce(:status, status),
+				    anomaly_overrides = coalesce(CAST(:anomalyOverrides AS jsonb), anomaly_overrides),
 				    updated_at = now()
 				WHERE id = :id
 				RETURNING
@@ -111,7 +119,9 @@ class TenantRepository {
 			.param("retentionDays", change.retentionDays())
 			.param("storeRendered", change.storeRenderedContent())
 			.param("status", change.status())
-			.query(TenantRepository::map)
+			.param("anomalyOverrides",
+					change.anomalyOverrides() == null ? null : jsonMapper.writeValueAsString(change.anomalyOverrides()))
+			.query(this::map)
 			.single();
 	}
 
@@ -119,7 +129,7 @@ class TenantRepository {
 		return jdbc.sql("UPDATE tenant SET sending_paused_at = NULL, pause_reason = NULL, updated_at = now() "
 				+ "WHERE id = :id RETURNING " + COLUMNS)
 			.param("id", id)
-			.query(TenantRepository::map)
+			.query(this::map)
 			.single();
 	}
 
@@ -127,14 +137,17 @@ class TenantRepository {
 		return values == null ? null : values.toArray(String[]::new);
 	}
 
-	private static TenantView map(ResultSet rs, int row) throws SQLException {
+	private TenantView map(ResultSet rs, int row) throws SQLException {
+		String overrides = rs.getString("anomaly_overrides");
 		return new TenantView(rs.getObject("id", UUID.class), rs.getString("slug"), rs.getString("name"),
 				rs.getString("status"), rs.getString("from_email"), rs.getString("from_name"),
 				rs.getString("reply_to"), strings(rs.getArray("allowed_from_domains")),
 				strings(rs.getArray("allowed_link_hosts")), rs.getString("locale"), rs.getString("timezone"),
 				rs.getInt("rate_limit_per_minute"), rs.getInt("daily_quota"), rs.getInt("retention_days"),
 				rs.getBoolean("store_rendered_content"), instant(rs, "sending_paused_at"),
-				rs.getString("pause_reason"), instant(rs, "created_at"), instant(rs, "updated_at"));
+				rs.getString("pause_reason"),
+				overrides == null ? null : jsonMapper.readValue(overrides, TenantRequests.AnomalyOverrides.class),
+				instant(rs, "created_at"), instant(rs, "updated_at"));
 	}
 
 	static List<String> strings(Array array) throws SQLException {

@@ -8,5 +8,6 @@ import java.util.UUID;
 public record TenantView(UUID id, String slug, String name, String status, String fromEmail, String fromName,
 		String replyTo, List<String> allowedFromDomains, List<String> allowedLinkHosts, String locale,
 		String timezone, int rateLimitPerMinute, int dailyQuota, int retentionDays, boolean storeRenderedContent,
-		Instant sendingPausedAt, String pauseReason, Instant createdAt, Instant updatedAt) {
+		Instant sendingPausedAt, String pauseReason, TenantRequests.AnomalyOverrides anomalyOverrides, Instant createdAt,
+		Instant updatedAt) {
 }
