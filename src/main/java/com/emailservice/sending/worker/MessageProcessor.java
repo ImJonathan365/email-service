@@ -121,7 +121,7 @@ class MessageProcessor {
 
 		if (message.providerMessageId() != null) {
 			// The provider already accepted it: never call again (AC-13.6).
-			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive));
+			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null));
 			return false;
 		}
 		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(Instant.now())) {
@@ -150,6 +150,9 @@ class MessageProcessor {
 			return false;
 		}
 
+		QueueRepository.StoredContent stored = context.storeRenderedContent()
+				? storedCopy(context, schema, variables, message) : null;
+
 		OutboundEmail email = new OutboundEmail(message.id(),
 				new OutboundEmail.Address(message.fromEmail(), message.fromName()),
 				message.replyTo() == null ? null : new OutboundEmail.Address(message.replyTo(), null),
@@ -165,7 +168,8 @@ class MessageProcessor {
 		try {
 			SendResult result = sender.send(email);
 			breaker.onSuccess();
-			boolean closed = queue.markSent(message, result.provider(), result.providerMessageId(), withoutSensitive);
+			boolean closed = queue.markSent(message, result.provider(), result.providerMessageId(), withoutSensitive,
+					stored);
 			if (closed) {
 				Timer.builder("email.time.to.sent")
 					.description("Acceptance to SENT (NFR-19)")
@@ -211,6 +215,25 @@ class MessageProcessor {
 				breaker.onTransientFailure();
 				retryOrFail(message, ex, withoutSensitive);
 			}
+		}
+	}
+
+	/**
+	 * The copy a tenant with storeRenderedContent keeps (AC-19.3): rendered a second time with the
+	 * sensitive values as [REDACTED], so the stored content never holds them. If that render fails
+	 * (e.g. a helper cannot format the marker), nothing is stored; the send itself is unaffected.
+	 */
+	private QueueRepository.StoredContent storedCopy(QueueRepository.SendContext context, VariablesSchema schema,
+			JsonNode variables, QueueRepository.Claimed message) {
+		try {
+			TemplateEngine.Rendered redacted = engine.render(
+					new TemplateEngine.Sources(context.subjectTemplate(), context.htmlTemplate(), context.textTemplate()),
+					SensitiveVariables.redact(schema, variables), message.locale(), ZoneId.of(context.timezone()));
+			return new QueueRepository.StoredContent(redacted.subject(), redacted.html(), redacted.text());
+		}
+		catch (TemplateEngine.RenderException ex) {
+			log.warn("Rendered content not stored: the redacted copy does not render");
+			return null;
 		}
 	}
 

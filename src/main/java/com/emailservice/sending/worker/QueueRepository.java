@@ -102,13 +102,14 @@ class QueueRepository {
 
 	/** The pinned version's content and the tenant settings a send needs (AC-12.2). */
 	record SendContext(String subjectTemplate, String htmlTemplate, String textTemplate, String variablesSchema,
-			String timezone, boolean tenantHeld) {
+			String timezone, boolean tenantHeld, boolean storeRenderedContent) {
 	}
 
 	SendContext context(UUID tenantId, UUID templateVersionId) {
 		return jdbc.sql("""
 				SELECT v.subject_template, v.html_template, v.text_template, v.variables_schema::text AS schema,
-				       t.timezone, (t.status <> 'ACTIVE' OR t.sending_paused_at IS NOT NULL) AS held
+				       t.timezone, (t.status <> 'ACTIVE' OR t.sending_paused_at IS NOT NULL) AS held,
+				       t.store_rendered_content
 				FROM template_version v JOIN tenant t ON t.id = v.tenant_id
 				WHERE v.tenant_id = :tenantId AND v.id = :versionId
 				""")
@@ -116,7 +117,7 @@ class QueueRepository {
 			.param("versionId", templateVersionId)
 			.query((rs, row) -> new SendContext(rs.getString("subject_template"), rs.getString("html_template"),
 					rs.getString("text_template"), rs.getString("schema"), rs.getString("timezone"),
-					rs.getBoolean("held")))
+					rs.getBoolean("held"), rs.getBoolean("store_rendered_content")))
 			.single();
 	}
 
@@ -133,21 +134,33 @@ class QueueRepository {
 			.optional();
 	}
 
+	/** The copy of the content kept for the tenant (AC-19.3), already without sensitive values. */
+	record StoredContent(String subject, String html, String text) {
+	}
+
 	/**
 	 * SENT, fenced. Sensitive variables go in the same statement (AC-23.5); finalized_at stays
-	 * null because SENT is not terminal. Returns false when the lock was lost.
+	 * null because SENT is not terminal. {@code stored} is null unless the tenant keeps rendered
+	 * content. Returns false when the lock was lost.
 	 */
-	boolean markSent(Claimed message, String provider, String providerMessageId, String variables) {
+	boolean markSent(Claimed message, String provider, String providerMessageId, String variables,
+			StoredContent stored) {
 		return jdbc.sql("""
 				UPDATE email_message
 				SET status = 'SENT', provider = :provider, provider_message_id = :providerMessageId, sent_at = now(),
 				    variables = CAST(:variables AS jsonb), lock_token = NULL, lock_expires_at = NULL,
-				    locked_by = NULL, updated_at = now()
+				    locked_by = NULL, updated_at = now(),
+				    rendered_subject = coalesce(:renderedSubject, rendered_subject),
+				    rendered_html = coalesce(:renderedHtml, rendered_html),
+				    rendered_text = coalesce(:renderedText, rendered_text)
 				WHERE id = :id AND status = 'SENDING' AND lock_token = :token
 				""")
 			.param("provider", provider)
 			.param("providerMessageId", providerMessageId)
 			.param("variables", variables)
+			.param("renderedSubject", stored == null ? null : stored.subject())
+			.param("renderedHtml", stored == null ? null : stored.html())
+			.param("renderedText", stored == null ? null : stored.text())
 			.param("id", message.id())
 			.param("token", message.lockToken())
 			.update() == 1;

@@ -18,6 +18,7 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -92,10 +93,20 @@ class ApiExceptionHandler {
 					"Method " + ex.getMethod() + " is not supported on this resource.", List.of()));
 	}
 
-	@ExceptionHandler({ NoResourceFoundException.class, MethodArgumentTypeMismatchException.class })
+	@ExceptionHandler(NoResourceFoundException.class)
 	ResponseEntity<Problem> notFound(Exception ex, HttpServletRequest request) {
 		return problems.entity(request, ErrorCode.RESOURCE_NOT_FOUND, "The requested resource does not exist.",
 				List.of());
+	}
+
+	/** A malformed path segment names no resource (404); a malformed query parameter is invalid input (422). */
+	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
+	ResponseEntity<Problem> typeMismatch(MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+		if (ex.getParameter().hasParameterAnnotation(PathVariable.class)) {
+			return notFound(ex, request);
+		}
+		return problems.entity(request, ErrorCode.VALIDATION_ERROR, "One or more fields are invalid.",
+				List.of(new Problem.FieldError(ex.getName(), "has an invalid format")));
 	}
 
 	@ExceptionHandler({ CannotGetJdbcConnectionException.class, CannotCreateTransactionException.class,

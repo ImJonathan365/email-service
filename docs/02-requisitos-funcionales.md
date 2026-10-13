@@ -306,7 +306,7 @@ Requiere el ámbito `templates:write` (FR-33).
 ### FR-20 — Listado y filtrado de envíos (Should)
 
 - **AC-20.1** — **(rev. 2026-10)** `GET /v1/emails` admite los filtros `status`, `templateKey`, `to` (destinatario), `tag`, `createdAfter` y `createdBefore` (fechas), con paginación por cursor; por defecto, los 20 más recientes primero.
-- **AC-20.2** — **(rev. 2026-10)** Responde en ≤ 500 ms (p95) con el dataset de referencia: 4 tenants y 1 000 000 de filas por tenant, el 70 % del volumen total en uno de ellos.
+- **AC-20.2** — **(rev. 2026-10-12, owner)** Responde en ≤ 500 ms (p95) con el **dataset de referencia**: 4 tenants y 4 000 000 de mensajes en total, 2 800 000 (70 %) en uno de ellos y 400 000 en cada uno de los otros tres. Se mide con `./gradlew benchmarkOperations` a través de la API (autenticación y RLS incluidas); informe en `build/reports/operations-benchmark.txt`. La redacción anterior ("1 000 000 de filas por tenant, el 70 % en uno") era contradictoria.
 - **AC-20.3** — Solo devuelve mensajes del tenant autenticado (verificado por test de aislamiento y por RLS).
 
 ### FR-21 — Límites de tasa y cuotas por tenant (Must)

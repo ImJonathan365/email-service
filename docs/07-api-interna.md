@@ -199,6 +199,15 @@ Content-Type: application/json
 
 Incluye `renderedSubject` / `renderedHtml` solo si el tenant tiene `storeRenderedContent = true` y no se han purgado (variables `x-sensitive` como `[REDACTED]`). Un `id` de otro tenant → `404 MESSAGE_NOT_FOUND`.
 
+**(rev. 2026-10-12) Implementado en H7:**
+- **Campos que se añaden al ejemplo:**
+  - `locale` (efectivo), `cc`, `bcc` y `firstClickedAt`;
+  - `lastError`: el código del último intento, visible también mientras el mensaje sigue reintentando; `failureCode` solo existe en `FAILED`;
+  - `renderedText`, con las mismas condiciones que `renderedSubject` y `renderedHtml`.
+- **Contenido renderizado:** el worker lo guarda solo con `storeRenderedContent = true`. Hace una segunda renderización con las variables `x-sensitive` sustituidas por `[REDACTED]`, así que la copia guardada nunca contiene valores sensibles. Lo enviado sí los llevaba. Si el tenant desactiva el flag, deja de mostrarse.
+- **`events`:** el historial de webhooks del mensaje, en orden (`type`, `occurredAt`).
+- **Scope:** requiere `emails:read`; sin él, `403`. Un `id` mal formado → `404`.
+
 ## 6. `GET /v1/emails` — listado
 
 `?status=FAILED&templateKey=password-reset&to=ana@example.com&tag=password-reset&createdAfter=2026-09-01T00:00:00Z&createdBefore=2026-10-01T00:00:00Z&limit=20&cursor=…`
@@ -209,6 +218,16 @@ Incluye `renderedSubject` / `renderedHtml` solo si el tenant tiene `storeRendere
   "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2…"
 }
 ```
+
+**(rev. 2026-10-12)** Reglas del listado:
+- **Orden y tamaño:** del más reciente al más antiguo; `limit` de 1 a 100 (20 por defecto).
+- **Filtros:**
+  - `to` no distingue mayúsculas;
+  - `tag` es un único tag;
+  - `createdAfter` es inclusivo y `createdBefore` exclusivo, ambos en ISO-8601;
+  - un `templateKey` inexistente devuelve una lista vacía.
+- **Cursor:** `cursor` es el `nextCursor` anterior. Las páginas no se repiten ni dejan huecos aunque lleguen mensajes nuevos entre una petición y otra.
+- **Errores:** un parámetro mal formado (`status` desconocido, fecha inválida, cursor ajeno) → `422 VALIDATION_ERROR`.
 
 ## 7. Plantillas
 
