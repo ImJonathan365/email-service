@@ -187,7 +187,7 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 **(rev. 2026-10-12) Comportamiento implementado en H7, parte 2:**
 - **Rate limit y cuota** (FR-21):
   - el contador `rate_limit_counter` se incrementa en la transacción del `INSERT`, después de las validaciones;
-  - la ventana `MINUTE` es UTC y la `DAY` sigue el calendario del tenant (`timezone`);
+  - la ventana `MINUTE` es UTC y la `DAY` sigue el calendario del tenant (`timezone`). **(rev. 2026-10-13)** Ambas se calculan con el `Clock` de la aplicación, no con `now()` de PostgreSQL; las instancias coinciden en el minuto mientras sus relojes estén sincronizados (NTP);
   - al superarse, `429 RATE_LIMITED` con `Retry-After` hasta el fin de la ventana; el rollback deshace el incremento, así que el rechazo no consume cuota;
   - los límites se leen en cada petición, así que un `PATCH` aplica sin redesplegar;
   - auditoría agregada: una fila `TENANT_RATE_LIMITED` por tenant, ventana y hora (owner), en su propia transacción;
@@ -216,6 +216,17 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
   - `email_purged_rows_total{data}`.
 - **Alertas** (README, "Alertas"): `QUEUE_AGE`, `FAILED_RATE`, `TENANT_PAUSED`, `CIRCUIT_BREAKER_OPEN`, `LOST_LOCK`, `IDEMPOTENCY_CONFLICT`, `COMPLAINT_RATE`, `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`.
 - **Logs (AC-24.3):** el worker y los webhooks añaden `tenantSlug` y `messageId` al MDC. `EmailAddresses.masked` es la única forma admitida de mostrar una dirección; hoy ninguna línea de log la necesita.
+
+**(rev. 2026-10-13) Fuente de la hora.** Toda decisión de la aplicación que depende de la hora usa el bean `Clock`, nunca `Instant.now()` ni la hora del sistema:
+- **Envío y webhooks:** ventana de 23 h, próximo intento, `Retry-After` con fecha HTTP y hora de respaldo de un webhook.
+- **Protección:** ventanas del rate limit y su auditoría horaria, ventanas de `401` por IP, refresco de prefijos de keys y circuit breaker.
+- **Observabilidad:** deduplicación de alertas.
+
+Quedan fuera dos usos legítimos:
+- `System.nanoTime` como reloj monótono (limitador de llamadas al proveedor, ya inyectable, y el intervalo del bucle del worker);
+- la hora de los UUID v7.
+
+Las ventanas de las purgas y de las anomalías se calculan en SQL con `now()`, de modo que la consulta y sus datos usan la misma hora.
 
 **Salvaguardas anti-duplicados (rev. 2026-10):**
 1. `Idempotency-Key = message.id` hacia el proveedor (deduplicación de 24 h).

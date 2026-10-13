@@ -45,10 +45,10 @@ class ProviderConfig {
 
 	@Bean
 	@ConditionalOnProperty(prefix = "app.mail", name = "provider", havingValue = "resend")
-	EmailSender resendEmailSender(AppProperties properties, JsonMapper jsonMapper) {
+	EmailSender resendEmailSender(AppProperties properties, JsonMapper jsonMapper, Clock clock) {
 		return new ResendEmailSender(properties.provider().resendApiUrl(), properties.provider().resendApiKey(),
 				Duration.ofMillis(properties.mail().connectTimeoutMs()), Duration.ofMillis(properties.mail().readTimeoutMs()),
-				jsonMapper);
+				jsonMapper, clock);
 	}
 
 	@Bean

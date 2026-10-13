@@ -1,6 +1,7 @@
 package com.emailservice.sending.worker;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -79,10 +80,13 @@ class MessageProcessor {
 
 	private final DistributionSummary attempts;
 
+	private final Clock clock;
+
 	MessageProcessor(QueueRepository queue, EmailSender sender, TemplateEngine engine, SuppressionHashes hashes,
 			JsonMapper jsonMapper, MeterRegistry meters, AuditLog auditLog, CircuitBreaker breaker,
 			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, Alerts alerts, ProviderOutcomes outcomes,
-			AppProperties properties) {
+			Clock clock, AppProperties properties) {
+		this.clock = clock;
 		this.messageEvents = messageEvents;
 		this.alerts = alerts;
 		this.outcomes = outcomes;
@@ -140,7 +144,7 @@ class MessageProcessor {
 			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null));
 			return false;
 		}
-		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(Instant.now())) {
+		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(clock.instant())) {
 			fail(message, "RETRY_WINDOW_EXCEEDED", "The first attempt is older than 23 hours.", withoutSensitive);
 			return false;
 		}
@@ -193,7 +197,7 @@ class MessageProcessor {
 					.description("Acceptance to SENT (NFR-19)")
 					.tag("category", message.category())
 					.register(meters)
-					.record(Duration.between(message.createdAt(), Instant.now()));
+					.record(Duration.between(message.createdAt(), clock.instant()));
 			}
 			sent(message, closed);
 		}
@@ -277,7 +281,7 @@ class MessageProcessor {
 			fail(message, "MAX_ATTEMPTS_EXCEEDED", "Last error: " + ex.code(), withoutSensitive);
 			return;
 		}
-		Instant next = Instant.now().plus(retryPolicy.delayAfter(message.attempts(), ex.retryAfter()));
+		Instant next = clock.instant().plus(retryPolicy.delayAfter(message.attempts(), ex.retryAfter()));
 		if (message.firstAttemptAt() != null && next.isAfter(message.firstAttemptAt().plus(RETRY_WINDOW))) {
 			fail(message, "RETRY_WINDOW_EXCEEDED", "Last error: " + ex.code(), withoutSensitive);
 			return;

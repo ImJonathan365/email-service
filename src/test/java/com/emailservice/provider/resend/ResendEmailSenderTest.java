@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -26,6 +27,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import com.emailservice.provider.OutboundEmail;
 import com.emailservice.provider.SendException;
 import com.emailservice.provider.SendResult;
+import com.emailservice.support.MutableClock;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.http.Fault;
 
@@ -39,6 +41,9 @@ class ResendEmailSenderTest {
 	static WireMockServer resend;
 
 	ResendEmailSender sender;
+
+	/** A fixed clock: a Retry-After date is measured against it, never against the system time. */
+	final MutableClock clock = new MutableClock();
 
 	@BeforeAll
 	static void start() {
@@ -55,7 +60,7 @@ class ResendEmailSenderTest {
 	void setUp() {
 		resend.resetAll();
 		sender = new ResendEmailSender(resend.baseUrl() + "/", KEY, Duration.ofSeconds(2), Duration.ofMillis(500),
-				JsonMapper.builder().build());
+				JsonMapper.builder().build(), clock);
 	}
 
 	static OutboundEmail email(UUID id) {
@@ -160,11 +165,12 @@ class ResendEmailSenderTest {
 			.withBody("{\"name\": \"rate_limit_exceeded\"}")));
 		assertThat(failure().retryAfter()).isEqualTo(Duration.ofSeconds(17));
 
-		String inTwoMinutes = DateTimeFormatter.RFC_1123_DATE_TIME.format(ZonedDateTime.now().plusMinutes(2));
+		String inTwoMinutes = DateTimeFormatter.RFC_1123_DATE_TIME
+			.format(ZonedDateTime.ofInstant(clock.instant().plusSeconds(120), ZoneOffset.UTC));
 		resend.stubFor(post("/emails").willReturn(aResponse().withStatus(429)
 			.withHeader("Retry-After", inTwoMinutes)
 			.withBody("{\"name\": \"daily_quota_exceeded\"}")));
-		assertThat(failure().retryAfter()).isBetween(Duration.ofSeconds(100), Duration.ofSeconds(121));
+		assertThat(failure().retryAfter()).as("measured against the injected clock").isEqualTo(Duration.ofSeconds(120));
 	}
 
 	@Test
