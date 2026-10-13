@@ -394,6 +394,11 @@ svix-signature: v1,k8s9…
 
 **(rev. 2026-10-06) Comportamiento implementado en H2:**
 - `PATCH /admin/v1/tenants/{slug}` es una actualización parcial: un campo ausente o `null` conserva su valor (por eso `replyTo` no se puede vaciar con un `PATCH`). Las listas (`allowedFromDomains`, `allowedLinkHosts`) se sustituyen completas y se normalizan a minúsculas. `status` admite `ACTIVE` o `SUSPENDED`.
+- **(rev. 2026-10-12)** `anomalyOverrides` cambia los umbrales de FR-34 de ese tenant (AC-34.5): `{ "volumeMultiplier": 4, "minHourly": 200, "bouncePauseRate": 0.05, "complaintPauseRate": 0.002 }`.
+  - Un campo ausente usa el valor del servicio.
+  - `minHourly` solo sube el mínimo: uno menor que `ANOMALY_MIN_HOURLY` no tiene efecto.
+  - Rangos: `volumeMultiplier` de 1 a 100; las tasas, estrictamente entre 0 y 1.
+  - El objeto enviado sustituye al anterior y aparece en la respuesta.
 - `GET /admin/v1/tenants` y `GET /admin/v1/tenants/{slug}/api-keys` responden `{"data": [...], "nextCursor": null}`.
 - Todo acceso a `/admin/v1/**` queda en auditoría: las modificaciones con su acción (`TENANT_CREATED`, `TENANT_UPDATED` con los nombres de los campos cambiados, `TENANT_SUSPENDED`, `TENANT_REACTIVATED`, `API_KEY_ISSUED`, `API_KEY_REVOKED`), las lecturas como `ADMIN_ACCESS` y los rechazos como `ADMIN_ACCESS_DENIED`.
 - Una ruta que existe con otro método responde `405 METHOD_NOT_ALLOWED` con la cabecera `Allow`; un cuerpo que no es JSON, `415 UNSUPPORTED_MEDIA_TYPE` (añadidos al catálogo el 2026-10-06; compatibles según NFR-17).
@@ -447,7 +452,7 @@ svix-signature: v1,k8s9…
 | 422 | `ATTACHMENT_INVALID` | **Reservado** (FR-30 Won't); no se emite en el MVP |
 | 422 | `SEND_AT_OUT_OF_RANGE` | **(rev. 2026-10)** `sendAt` en el pasado o a más de 30 días |
 | 422 | `RECIPIENT_SUPPRESSED` | Solo en modo `reject` |
-| 429 | `RATE_LIMITED` | Límite por minuto o cuota diaria (incluye `Retry-After`) |
+| 429 | `RATE_LIMITED` | Límite por minuto o cuota diaria (incluye `Retry-After`). **(rev. 2026-10-12)** También una IP con demasiados `401`, solo en peticiones sin prefijo de key conocido (`08` §4) |
 | 500 | `INTERNAL_ERROR` | Fallo no esperado (sin detalles internos) |
 | 503 | `SERVICE_UNAVAILABLE` | Base de datos no disponible |
 

@@ -2,6 +2,28 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-12 — H7, parte 2: protección
+
+- **Hecho:**
+  - **Rate limit y cuota por tenant** (FR-21):
+    - contador en PostgreSQL en la transacción del `INSERT`; minuto UTC y día del calendario del tenant;
+    - `429 RATE_LIMITED` con `Retry-After`; sin consumo en rechazos ni repeticiones idempotentes; un `FAILED/SUPPRESSED` sí consume;
+    - límites aplicados sin redesplegar;
+    - auditoría agregada por tenant, ventana y hora.
+  - **`401` repetidos por IP** (docs/08 §4, esquema del owner):
+    - prefijos de keys activas en memoria, refrescados cada 60 s y al emitir o revocar;
+    - por encima de `AUTH_FAILURES_PER_MINUTE_PER_IP` (30), `429` sin consulta a la BD solo para keys ausentes, mal formadas o de prefijo desconocido;
+    - un prefijo conocido sigue la verificación completa, así que la revocación es inmediata;
+    - auditoría `AUTHENTICATION_FAILURES_BY_IP` por IP y hora; métrica `email_auth_key_lookups_total` para verificar que no hubo consulta.
+  - **Anomalías y pausa automática** (FR-34):
+    - tarea `detectAnomalies` cada 5 min (volumen contra el p95 horario de 14 días, rebotes, quejas), con los mínimos de volumen como suelo;
+    - `anomalyOverrides` por tenant en el `PATCH` de administración;
+    - pausa auditada, con métrica y alerta.
+  - **Alertas estructuradas** (`alert`, `alertSubject`) deduplicadas 15 min. La pausa por dominio no verificado de H5 usa la misma alerta `TENANT_PAUSED`.
+  - **Tareas periódicas del worker** (`PeriodicTasks`), base de las purgas de la parte 3.
+  - **Test del trigger de tags** con un `INSERT` multifila y varias sentencias en una transacción, más el borrado en cascada (pedido por el owner para H8).
+- **Pendiente (parte 3):** purgas, borrado por titular, indicadores `queue`/`provider`, métricas y alertas restantes y documentación de las alertas en el README.
+
 ## 2026-10-12 — H7, parte 1: consultas
 
 - **Hecho:**

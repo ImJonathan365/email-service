@@ -11,6 +11,9 @@ import org.springframework.stereotype.Repository;
 
 import com.emailservice.common.persistence.SystemDataSource;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * Finds a key by its public prefix before any tenant is known, hence email_system (ADR-0008).
  * No cache: one indexed read per request is cheap at this volume and revocation is immediate.
@@ -20,8 +23,13 @@ class ApiKeyLookup {
 
 	private final JdbcClient jdbc;
 
-	ApiKeyLookup(@SystemDataSource JdbcClient jdbc) {
+	private final Counter lookups;
+
+	ApiKeyLookup(@SystemDataSource JdbcClient jdbc, MeterRegistry meters) {
 		this.jdbc = jdbc;
+		this.lookups = Counter.builder("email.auth.key.lookups")
+			.description("Database lookups of an API key; requests limited per IP never reach it (docs/08 §4)")
+			.register(meters);
 	}
 
 	JdbcClient jdbc() {
@@ -29,6 +37,7 @@ class ApiKeyLookup {
 	}
 
 	Optional<KeyRow> findByPrefix(String keyPrefix) {
+		lookups.increment();
 		return jdbc.sql("""
 				SELECT k.id, k.tenant_id, k.key_hash, k.scopes, k.allowed_cidrs::text[] AS allowed_cidrs,
 				       k.status, k.expires_at IS NOT NULL AND k.expires_at <= now() AS expired,

@@ -34,6 +34,35 @@
         },
         "type" : "object"
       },
+      "AnomalyOverrides" : {
+        "properties" : {
+          "bouncePauseRate" : {
+            "exclusiveMaximum" : 1.0,
+            "exclusiveMinimum" : 0.0,
+            "format" : "double",
+            "type" : "number"
+          },
+          "complaintPauseRate" : {
+            "exclusiveMaximum" : 1.0,
+            "exclusiveMinimum" : 0.0,
+            "format" : "double",
+            "type" : "number"
+          },
+          "minHourly" : {
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "volumeMultiplier" : {
+            "format" : "double",
+            "maximum" : 100.0,
+            "minimum" : 1.0,
+            "type" : "number"
+          }
+        },
+        "type" : "object"
+      },
       "Create" : {
         "properties" : {
           "allowedFromDomains" : {
@@ -311,6 +340,9 @@
             },
             "type" : "array"
           },
+          "anomalyOverrides" : {
+            "$ref" : "#/components/schemas/AnomalyOverrides"
+          },
           "createdAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -389,6 +421,9 @@
             "maxItems" : 50,
             "minItems" : 0,
             "type" : "array"
+          },
+          "anomalyOverrides" : {
+            "$ref" : "#/components/schemas/AnomalyOverrides"
           },
           "dailyQuota" : {
             "exclusiveMinimum" : 0,

@@ -110,23 +110,27 @@ class AppPropertiesTest {
 	@Test
 	void tenantDefaultsAndLocalesAreValidated() {
 		assertThat(apiWith(null, ADMIN, null).tenancy()).isEqualTo(Tenancy.DEFAULTS);
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(0, 1000, 90, List.of("es-CR"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(0, 1000, 90, List.of("es-CR"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("DEFAULT_RATE_LIMIT_PER_MINUTE");
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, -1, 90, List.of("es-CR"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, -1, 90, List.of("es-CR"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("DEFAULT_DAILY_QUOTA");
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 401, List.of("es-CR"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 401, List.of("es-CR"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("DEFAULT_RETENTION_DAYS");
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR", "fr"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR", "fr"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("SUPPORTED_LOCALES");
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR"), 0.5, 50, 0.04, 0.001)))
+			.hasMessageContaining("ANOMALY_VOLUME_MULTIPLIER");
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR"), 3, 50, 1.5, 0.001)))
+			.hasMessageContaining("BOUNCE_PAUSE_RATE");
 	}
 
 	@Test
 	void trustedProxiesMustBeValidCidrs() {
-		assertThat(apiWith(new Http(List.of(" 10.0.0.0/8 ", "192.168.1.10")), ADMIN, null).http().trustedProxyRanges())
+		assertThat(apiWith(new Http(List.of(" 10.0.0.0/8 ", "192.168.1.10"), 30), ADMIN, null).http().trustedProxyRanges())
 			.hasSize(2);
-		assertThatThrownBy(() -> apiWith(new Http(List.of("10.0.0.1/8")), ADMIN, null))
+		assertThatThrownBy(() -> apiWith(new Http(List.of("10.0.0.1/8"), 30), ADMIN, null))
 			.hasMessageContaining("TRUSTED_PROXIES");
-		assertThatThrownBy(() -> apiWith(new Http(List.of("proxy.internal")), ADMIN, null))
+		assertThatThrownBy(() -> apiWith(new Http(List.of("proxy.internal"), 30), ADMIN, null))
 			.hasMessageContaining("TRUSTED_PROXIES");
 	}
 

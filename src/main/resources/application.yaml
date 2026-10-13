@@ -59,6 +59,7 @@ app:
       password: ${DB_OWNER_PASSWORD:}
   http:
     trusted-proxies: ${TRUSTED_PROXIES:}
+    auth-failures-per-minute-per-ip: ${AUTH_FAILURES_PER_MINUTE_PER_IP:30}
   admin:
     api-keys: ${ADMIN_API_KEYS:}
   tenancy:
@@ -66,6 +67,10 @@ app:
     default-daily-quota: ${DEFAULT_DAILY_QUOTA:1000}
     default-retention-days: ${DEFAULT_RETENTION_DAYS:90}
     supported-locales: ${SUPPORTED_LOCALES:es-CR,en}
+    anomaly-volume-multiplier: ${ANOMALY_VOLUME_MULTIPLIER:3}
+    anomaly-min-hourly: ${ANOMALY_MIN_HOURLY:50}
+    bounce-pause-rate: ${BOUNCE_PAUSE_RATE:0.04}
+    complaint-pause-rate: ${COMPLAINT_PAUSE_RATE:0.001}
   mail:
     provider: ${MAIL_PROVIDER:smtp}
     smtp-host: ${SMTP_HOST:mailpit}

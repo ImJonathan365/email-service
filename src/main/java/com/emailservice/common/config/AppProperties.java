@@ -24,7 +24,7 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 		Objects.requireNonNull(env, "APP_ENV is required");
 		Objects.requireNonNull(role, "APP_ROLE is required");
 		Objects.requireNonNull(db, "DB_* configuration is required");
-		http = http == null ? new Http(List.of()) : http;
+		http = http == null ? new Http(List.of(), 30) : http;
 		admin = admin == null ? new Admin(List.of()) : admin;
 		tenancy = tenancy == null ? Tenancy.DEFAULTS : tenancy;
 		mail = mail == null ? Mail.DEFAULTS : mail;
@@ -98,11 +98,16 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 	}
 
-	/** TRUSTED_PROXIES: proxies whose X-Forwarded-For is believed (AC-33.3). */
-	public record Http(List<String> trustedProxies) {
+	/**
+	 * TRUSTED_PROXIES: proxies whose X-Forwarded-For is believed (AC-33.3).
+	 * AUTH_FAILURES_PER_MINUTE_PER_IP: past it, requests from that IP without a known key prefix get
+	 * 429 without a database lookup (docs/08 §4).
+	 */
+	public record Http(List<String> trustedProxies, int authFailuresPerMinutePerIp) {
 
 		public Http {
 			trustedProxies = trimmed(trustedProxies);
+			authFailuresPerMinutePerIp = authFailuresPerMinutePerIp == 0 ? 30 : authFailuresPerMinutePerIp;
 		}
 
 		public List<Cidr> trustedProxyRanges() {
@@ -117,6 +122,9 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 				catch (IllegalArgumentException ex) {
 					problems.add("TRUSTED_PROXIES has an invalid CIDR: " + proxy);
 				}
+			}
+			if (authFailuresPerMinutePerIp < 1) {
+				problems.add("AUTH_FAILURES_PER_MINUTE_PER_IP must be at least 1");
 			}
 		}
 
@@ -150,17 +158,25 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 	}
 
-	/** Defaults applied to new tenants (AC-02.5) and the locales templates may use (FR-37). */
+	/**
+	 * Defaults applied to new tenants (AC-02.5), the locales templates may use (FR-37) and the
+	 * anomaly thresholds of FR-34, which a tenant's anomalyOverrides can adjust (AC-34.5).
+	 */
 	public record Tenancy(int defaultRateLimitPerMinute, int defaultDailyQuota, int defaultRetentionDays,
-			List<String> supportedLocales) {
+			List<String> supportedLocales, double anomalyVolumeMultiplier, int anomalyMinHourly, double bouncePauseRate,
+			double complaintPauseRate) {
 
 		// The template_version.locale CHECK constraint bounds what can ever be configured.
 		static final Set<String> KNOWN_LOCALES = Set.of("es-CR", "en");
 
-		static final Tenancy DEFAULTS = new Tenancy(60, 1000, 90, List.of("es-CR", "en"));
+		static final Tenancy DEFAULTS = new Tenancy(60, 1000, 90, List.of("es-CR", "en"), 3, 50, 0.04, 0.001);
 
 		public Tenancy {
 			supportedLocales = trimmed(supportedLocales);
+			anomalyVolumeMultiplier = anomalyVolumeMultiplier == 0 ? 3 : anomalyVolumeMultiplier;
+			anomalyMinHourly = anomalyMinHourly == 0 ? 50 : anomalyMinHourly;
+			bouncePauseRate = bouncePauseRate == 0 ? 0.04 : bouncePauseRate;
+			complaintPauseRate = complaintPauseRate == 0 ? 0.001 : complaintPauseRate;
 		}
 
 		private void validate(List<String> problems) {
@@ -175,6 +191,12 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			}
 			if (supportedLocales.isEmpty() || !KNOWN_LOCALES.containsAll(supportedLocales)) {
 				problems.add("SUPPORTED_LOCALES must be a non-empty subset of " + KNOWN_LOCALES);
+			}
+			if (anomalyVolumeMultiplier < 1 || anomalyMinHourly < 1) {
+				problems.add("ANOMALY_VOLUME_MULTIPLIER and ANOMALY_MIN_HOURLY must be at least 1");
+			}
+			if (!(bouncePauseRate > 0 && bouncePauseRate < 1 && complaintPauseRate > 0 && complaintPauseRate < 1)) {
+				problems.add("BOUNCE_PAUSE_RATE and COMPLAINT_PAUSE_RATE must be between 0 and 1");
 			}
 		}
 
