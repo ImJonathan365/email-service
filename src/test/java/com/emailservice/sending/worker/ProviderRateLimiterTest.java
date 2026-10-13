@@ -58,26 +58,45 @@ class ProviderRateLimiterTest {
 		assertThat(ticker.now).isEqualTo(before);
 	}
 
+	/**
+	 * Time stands still and each thread records the slot it would sleep until: whatever the thread
+	 * scheduling, 25 concurrent callers get 25 distinct slots exactly 1/RPS apart, so no second
+	 * ever holds more than RPS calls. No real clock, so no scheduling jitter in the result.
+	 */
 	@Test
-	void ac_12_6_concurrentWorkersNeverExceedTheRateInAnyOneSecondWindow() throws Exception {
+	void ac_12_6_concurrentWorkersGetDistinctSlotsExactlyOneIntervalApart() throws Exception {
 		int rps = 10;
-		ProviderRateLimiter limiter = new ProviderRateLimiter(rps, ProviderRateLimiter.Ticker.SYSTEM);
-		ConcurrentLinkedQueue<Long> calls = new ConcurrentLinkedQueue<>();
+		long start = 1_000 * SECOND;
+		ThreadLocal<Long> slept = ThreadLocal.withInitial(() -> 0L);
+		ProviderRateLimiter.Ticker frozen = new ProviderRateLimiter.Ticker() {
+
+			@Override
+			public long nanoTime() {
+				return start;
+			}
+
+			@Override
+			public void sleepNanos(long nanos) {
+				slept.set(nanos);
+			}
+		};
+		ProviderRateLimiter limiter = new ProviderRateLimiter(rps, frozen);
+		ConcurrentLinkedQueue<Long> slots = new ConcurrentLinkedQueue<>();
 		try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
 			for (int i = 0; i < 25; i++) {
 				executor.submit(() -> {
 					limiter.acquire();
-					calls.add(System.nanoTime());
+					slots.add(slept.get());
 					return null;
 				});
 			}
 		}
-		List<Long> sorted = calls.stream().sorted().toList();
-		assertThat(sorted).hasSize(25);
-		// Any rps + 1 consecutive calls span at least one second, minus how late a thread may wake.
-		for (int i = rps; i < sorted.size(); i++) {
-			assertThat(sorted.get(i) - sorted.get(i - rps)).isGreaterThanOrEqualTo(SECOND - TimeUnit.MILLISECONDS.toNanos(25));
+
+		List<Long> expected = new ArrayList<>();
+		for (int i = 0; i < 25; i++) {
+			expected.add(i * (SECOND / rps));
 		}
+		assertThat(slots.stream().sorted().toList()).isEqualTo(expected);
 	}
 
 }

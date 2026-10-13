@@ -95,7 +95,10 @@ class WebhookTest extends IntegrationTest {
 	@Test
 	void ac_16_3_aSignatureOutsideTheWindowIsRejected() throws Exception {
 		String body = Webhooks.emailEvent("email.delivered", unknownEmailId(), null, "");
-		for (long timestamp : new long[] { Instant.now().getEpochSecond() - 301, Instant.now().getEpochSecond() + 301 }) {
+		// Far outside the window, so request latency cannot matter; the exact 300/301 s boundary is
+		// SvixWebhookVerifierTest's, on a fixed clock.
+		long now = Instant.now().getEpochSecond();
+		for (long timestamp : new long[] { now - 600, now + 600 }) {
 			String eventId = Webhooks.newEventId();
 			String signature = Webhooks.sign(IntegrationTestEnvironment.WEBHOOK_SECRET, eventId, timestamp, body);
 			assertThat(webhooks.post(eventId, timestamp, signature, body).statusCode()).isEqualTo(401);

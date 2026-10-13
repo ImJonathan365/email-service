@@ -6,18 +6,22 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import java.net.InetAddress;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.emailservice.audit.AuditLog;
+import com.emailservice.common.alert.Alerts;
 import com.emailservice.common.api.ApiException;
 import com.emailservice.common.api.ErrorCode;
+import com.emailservice.common.config.AppProperties;
+import com.emailservice.common.persistence.SystemDataSource;
 import com.emailservice.support.AdminApi;
 import com.emailservice.support.IntegrationTest;
 import com.emailservice.support.MutableClock;
@@ -29,22 +33,41 @@ import io.micrometer.core.instrument.MeterRegistry;
 
 /**
  * docs/08 §4 (owner, 2026-10-12): an IP past the failure limit gets 429 only for requests without
- * a known key prefix, without touching the database; known prefixes keep the full check. Driven
- * through the real authenticator with documentation addresses, so other tests keep 127.0.0.1.
+ * a known key prefix, without touching the database; known prefixes keep the full check.
+ *
+ * Deterministic: each test builds its own authenticator, failure windows, prefix set and alerts
+ * on its own clock, fixed in the middle of a minute and of an hour, and moves it explicitly. The
+ * addresses come from a counter and never repeat, and nothing time-based is shared with other
+ * tests. Only the database, the key lookup, the audit log and the metrics are the real beans.
  */
 class AuthIpLimitTest extends IntegrationTest {
 
-	@Autowired
-	ApiKeyAuthenticator authenticator;
+	/** Thirty seconds into a minute, twenty minutes into an hour: no window boundary is near. */
+	static final Instant START = Instant.parse("2031-03-04T10:20:30Z");
+
+	static final AtomicInteger ADDRESSES = new AtomicInteger();
 
 	@Autowired
-	AuthFailuresByIp failures;
+	ApiKeyLookup lookup;
+
+	@Autowired
+	AuditLog auditLog;
 
 	@Autowired
 	MeterRegistry meters;
 
 	@Autowired
+	AppProperties properties;
+
+	@Autowired
+	@SystemDataSource
+	JdbcClient systemJdbc;
+
 	MutableClock clock;
+
+	AuthFailuresByIp failures;
+
+	ApiKeyAuthenticator authenticator;
 
 	AdminApi admin;
 
@@ -54,17 +77,19 @@ class AuthIpLimitTest extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() throws Exception {
+		clock = new MutableClock();
+		clock.fixAt(START);
+		failures = new AuthFailuresByIp(properties, clock);
+		authenticator = new ApiKeyAuthenticator(lookup, auditLog, meters, new KnownKeyPrefixes(systemJdbc, clock),
+				failures, new Alerts(clock));
 		admin = new AdminApi(http());
-		// Fresh addresses per test, and a whole minute ahead: the window cannot roll over mid-test.
-		flooding = InetAddress.getByName("203.0.113." + (1 + (int) (Math.random() * 250)));
-		other = InetAddress.getByName("198.51.100." + (1 + (int) (Math.random() * 250)));
-		long millisIntoMinute = clock.millis() % 60_000;
-		clock.advance(Duration.ofMillis(60_000 - millisIntoMinute + 1_000));
+		flooding = nextAddress("203.0.113.");
+		other = nextAddress("198.51.100.");
 	}
 
-	@AfterEach
-	void restoreClock() {
-		clock.reset();
+	/** Documentation ranges (RFC 5737); 250 per range per run, far more than the tests use. */
+	static InetAddress nextAddress(String range) throws Exception {
+		return InetAddress.getByName(range + (1 + ADDRESSES.getAndIncrement() % 250));
 	}
 
 	ApiException attempt(String authorization, InetAddress ip) {
@@ -95,7 +120,7 @@ class AuthIpLimitTest extends IntegrationTest {
 		for (String authorization : new String[] { null, "Bearer not-a-key", inventedKey() }) {
 			ApiException limited = attempt(authorization, flooding);
 			assertThat(limited.code()).isEqualTo(ErrorCode.RATE_LIMITED);
-			assertThat(limited.retryAfterSeconds()).isBetween(1L, 60L);
+			assertThat(limited.retryAfterSeconds()).as("until the next minute").isEqualTo(30L);
 		}
 
 		assertThat(lookups() - before).as("no database lookup").isZero();
@@ -139,7 +164,7 @@ class AuthIpLimitTest extends IntegrationTest {
 		assertThat(attempt(key.bearer(), flooding).code()).as("known prefix: checked, not limited")
 			.isEqualTo(ErrorCode.UNAUTHENTICATED);
 
-		// After the next refresh the prefix is unknown, and the flooding address is limited for it.
+		// The next refresh drops the prefix. It is also the next minute, so the address floods again.
 		clock.advance(KnownKeyPrefixes.REFRESH_EVERY.plusSeconds(1));
 		floodFrom(flooding);
 		assertThat(attempt(key.bearer(), flooding).code()).isEqualTo(ErrorCode.RATE_LIMITED);
@@ -150,33 +175,37 @@ class AuthIpLimitTest extends IntegrationTest {
 		floodFrom(flooding);
 
 		assertThat(attempt(inventedKey(), other).code()).isEqualTo(ErrorCode.UNAUTHENTICATED);
+		assertThat(attempt(inventedKey(), flooding).code()).isEqualTo(ErrorCode.RATE_LIMITED);
 		clock.advance(Duration.ofSeconds(60));
-		assertThat(attempt(inventedKey(), flooding).code()).isEqualTo(ErrorCode.UNAUTHENTICATED);
+		assertThat(attempt(inventedKey(), flooding).code()).as("a new window").isEqualTo(ErrorCode.UNAUTHENTICATED);
 	}
 
 	@Test
 	void docs08_7_failuresAreAuditedOncePerAddressAndHour() throws Exception {
-		Instant start = Instant.now().minusSeconds(5);
-		// Two crossings of the limit in two different minutes of the same hour.
-		long millisIntoHour = clock.millis() % 3_600_000;
-		if (millisIntoHour > 3_600_000 - 180_000) {
-			clock.advance(Duration.ofMillis(3_600_000 - millisIntoHour + 1_000));
-		}
+		long before = auditRows(flooding);
+		// Two crossings of the limit, in two minutes of the same hour.
 		floodFrom(flooding);
 		assertThat(attempt(inventedKey(), flooding).code()).isEqualTo(ErrorCode.RATE_LIMITED);
 		clock.advance(Duration.ofSeconds(60));
 		floodFrom(flooding);
 
+		assertThat(auditRows(flooding) - before).isOne();
+
+		// The next hour audits again.
+		clock.advance(Duration.ofHours(1));
+		floodFrom(flooding);
+		assertThat(auditRows(flooding) - before).isEqualTo(2);
+	}
+
+	/** Counted before and after, so rows other tests wrote for the same address never matter. */
+	static long auditRows(InetAddress ip) throws Exception {
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
-				PreparedStatement statement = system.prepareStatement("""
-						SELECT count(*) FROM audit_log
-						WHERE action = 'AUTHENTICATION_FAILURES_BY_IP' AND resource_id = ? AND created_at >= ?
-						""")) {
-			statement.setString(1, flooding.getHostAddress());
-			statement.setObject(2, Timestamp.from(start));
+				PreparedStatement statement = system.prepareStatement(
+						"SELECT count(*) FROM audit_log WHERE action = 'AUTHENTICATION_FAILURES_BY_IP' AND resource_id = ?")) {
+			statement.setString(1, ip.getHostAddress());
 			var rs = statement.executeQuery();
 			rs.next();
-			assertThat(rs.getLong(1)).isOne();
+			return rs.getLong(1);
 		}
 	}
 
