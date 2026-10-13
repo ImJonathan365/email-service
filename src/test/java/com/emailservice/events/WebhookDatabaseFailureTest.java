@@ -7,6 +7,7 @@ import java.sql.Connection;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import com.emailservice.support.IntegrationTest;
 import com.emailservice.support.PostgresTestDatabase;
@@ -16,8 +17,11 @@ import com.emailservice.support.Webhooks;
 /**
  * AC-16.7: only a database failure turns into 503, so the provider retries the delivery. The
  * failures are real ones caused through the owner role and undone right after, so this test runs
- * in the shared context without mocks.
+ * in the shared context without mocks. It breaks the shared database for a moment: @Isolated keeps
+ * it alone if JUnit parallel execution is ever enabled; parallel Gradle forks each get their own
+ * container already.
  */
+@Isolated
 class WebhookDatabaseFailureTest extends IntegrationTest {
 
 	HttpResponse<String> deliver(String eventId) throws Exception {
