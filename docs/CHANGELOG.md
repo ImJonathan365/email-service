@@ -2,6 +2,32 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-12 — H7, parte 3: mantenimiento y observabilidad (H7 completo)
+
+- **Hecho:**
+  - **Purgas (FR-23)** en lotes idempotentes con advisory lock, como tareas del worker:
+    - variables a los 7 días de un estado terminal o final por tiempo;
+    - idempotencia a las 24 h;
+    - mensajes y eventos según la retención del tenant; los tags se van en cascada;
+    - `rendered_*` y huérfanos a los 30 días, contadores a los 2 días;
+    - `audit_log` a los 365 días mediante una función `SECURITY DEFINER` (V5);
+    - nunca `QUEUED`/`SENDING` ni supresiones.
+  - **Borrado por titular (FR-29):**
+    - en todos los tenants y en una transacción: mensajes, eventos y tags en cascada, `cc`/`bcc` limpiados, supresiones con solo el hash;
+    - auditado con hash y referencia; idempotente;
+    - 2,2 s con el dataset de referencia (AC-29.3, límite 60 s).
+  - **Health:** indicadores `queue` (`DEGRADED` con HTTP 200) y `provider` (últimos 5 min, sin *ping*).
+  - **Métricas de AC-24.2** que faltaban: estados, cola, retenidos, latencias de aceptación y del proveedor, intentos, tasas de rebote y queja por tenant, filas purgadas.
+  - **Alertas de NFR-11** como líneas `ERROR` con el campo `alert`, más `ops/prometheus/alerts.yml` de referencia. Los valores y qué hacer con cada uno están en el README.
+  - **Logs** con `tenantSlug` y `messageId` en el worker y los webhooks. Un test verifica que un envío completo no deja direcciones ni variables en los logs.
+  - **Configuración nueva:** `VARIABLES_RETENTION_DAYS`, `IDEMPOTENCY_RETENTION_HOURS`, `SENT_FINAL_AFTER_HOURS` y `QUEUE_AGE_ALERT_SECONDS`, validadas.
+  - **Test de valores por defecto:** fuera del perfil de test, el límite de `401` por IP es 30 (petición del owner).
+  - **Reloj hacia atrás:** el conjunto de prefijos y la deduplicación de alertas lo toleran.
+- **Propuestas pendientes de confirmar por el owner:**
+  - `DELIVERED` cuenta como final por tiempo igual que `SENT` (AC-23.9);
+  - `FAILED_RATE` exige al menos 20 mensajes en la hora;
+  - alertas añadidas: `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`.
+
 ## 2026-10-12 — H7, parte 2: protección
 
 - **Hecho:**

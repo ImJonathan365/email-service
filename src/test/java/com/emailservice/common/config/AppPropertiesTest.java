@@ -255,16 +255,30 @@ class AppPropertiesTest {
 	void ac_13_3_and_13_7_retryPolicyMustBeCoherentAndFitTheIdempotencyWindow() {
 		assertThat(local(NOOP_MAIL, SENDING, null).worker().maxAttempts()).isEqualTo(6);
 		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
-				new AppProperties.Worker(4, 1_000, 5, List.of(60, 300, 900, 3_600, 21_600), 60)))
+				new AppProperties.Worker(4, 1_000, 5, List.of(60, 300, 900, 3_600, 21_600), 60, 7, 24, 72, 300)))
 			.hasMessageContaining("AC-13.3");
 		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
-				new AppProperties.Worker(4, 1_000, 3, List.of(36_000, 36_000), 60)))
+				new AppProperties.Worker(4, 1_000, 3, List.of(36_000, 36_000), 60, 7, 24, 72, 300)))
 			.hasMessageContaining("AC-13.7");
-		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING, new AppProperties.Worker(4, 1_000, 2, List.of(60), 10)))
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 2, List.of(60), 10, 7, 24, 72, 300)))
 			.hasMessageContaining("LOCK_TIMEOUT_SECONDS");
-		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING, new AppProperties.Worker(0, 50, 2, List.of(60), 60)))
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(0, 50, 2, List.of(60), 60, 7, 24, 72, 300)))
 			.hasMessageContaining("WORKER_CONCURRENCY")
 			.hasMessageContaining("WORKER_POLL_INTERVAL_MS");
+	}
+
+	@Test
+	void ac_23_5_and_ac_08_5_retentionsAreBounded() {
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 2, List.of(60), 60, 7, 12, 72, 300)))
+			.as("idempotency must cover its 24 h")
+			.hasMessageContaining("IDEMPOTENCY_RETENTION_HOURS");
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 2, List.of(60), 60, 365, 24, 72, 10)))
+			.hasMessageContaining("VARIABLES_RETENTION_DAYS")
+			.hasMessageContaining("QUEUE_AGE_ALERT_SECONDS");
 	}
 
 	@Test

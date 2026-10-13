@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,7 +59,15 @@ class EventIngestion {
 			applySuppressions(message, event);
 		}
 		if (outcome == Outcome.PROCESSED) {
-			applyToMessage(message, event);
+			MDC.put("tenantSlug", message.tenantSlug());
+			MDC.put("messageId", message.id().toString());
+			try {
+				applyToMessage(message, event);
+			}
+			finally {
+				MDC.remove("tenantSlug");
+				MDC.remove("messageId");
+			}
 		}
 		return outcome;
 	}

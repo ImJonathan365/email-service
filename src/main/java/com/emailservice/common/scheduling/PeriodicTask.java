@@ -12,6 +12,11 @@ public interface PeriodicTask {
 
 	Duration interval();
 
+	/** First run after startup; daily tasks start sooner so frequent deploys never starve them. */
+	default Duration initialDelay() {
+		return interval();
+	}
+
 	void run();
 
 }

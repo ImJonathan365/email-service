@@ -26,6 +26,8 @@ import com.emailservice.common.persistence.SystemDataSource;
 import com.emailservice.common.scheduling.PeriodicTask;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.MultiGauge;
+import io.micrometer.core.instrument.Tags;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -63,6 +65,10 @@ class AnomalyDetector implements PeriodicTask {
 
 	private final AppProperties.Tenancy defaults;
 
+	private final MultiGauge bounceRates;
+
+	private final MultiGauge complaintRates;
+
 	AnomalyDetector(@SystemDataSource JdbcClient jdbc, AuditLog auditLog, Alerts alerts, MeterRegistry meters,
 			JsonMapper jsonMapper, AppProperties properties) {
 		this.jdbc = jdbc;
@@ -71,6 +77,12 @@ class AnomalyDetector implements PeriodicTask {
 		this.meters = meters;
 		this.jsonMapper = jsonMapper;
 		this.defaults = properties.tenancy();
+		this.bounceRates = MultiGauge.builder("email.tenant.bounce.rate")
+			.description("BOUNCED share of the last 24 hours' results, per tenant")
+			.register(meters);
+		this.complaintRates = MultiGauge.builder("email.tenant.complaint.rate")
+			.description("COMPLAINED share of the last 7 days' deliveries, per tenant")
+			.register(meters);
 	}
 
 	@Override
@@ -109,8 +121,11 @@ class AnomalyDetector implements PeriodicTask {
 		}
 		Map<UUID, long[]> history = hourlyHistory();
 		List<String> paused = new ArrayList<>();
-		for (Stats stats : stats()) {
+		List<Stats> all = stats();
+		publishRates(all);
+		for (Stats stats : all) {
 			Thresholds thresholds = thresholds(stats.overrides());
+			complaintRateAlert(stats, thresholds);
 			decide(stats, thresholds, history.getOrDefault(stats.tenantId(), new long[0]))
 				.filter(decision -> pause(stats, decision))
 				.ifPresent(decision -> paused.add(stats.slug()));
@@ -149,6 +164,30 @@ class AnomalyDetector implements PeriodicTask {
 		long[] all = Arrays.copyOf(hourlyCounts, HISTORY_HOURS);
 		Arrays.sort(all);
 		return all[(int) Math.ceil(0.95 * HISTORY_HOURS) - 1];
+	}
+
+	/** AC-24.2: bounce (24 h) and complaint (7 days) rates per tenant, as gauges. */
+	private void publishRates(List<Stats> all) {
+		bounceRates.register(all.stream()
+			.filter(stats -> stats.results24h() > 0)
+			.map(stats -> MultiGauge.Row.of(Tags.of("tenant", stats.slug()),
+					(double) stats.bounced24h() / stats.results24h()))
+			.toList(), true);
+		complaintRates.register(all.stream()
+			.filter(stats -> stats.delivered7d() > 0)
+			.map(stats -> MultiGauge.Row.of(Tags.of("tenant", stats.slug()),
+					(double) stats.complained7d() / stats.delivered7d()))
+			.toList(), true);
+	}
+
+	/** NFR-11: a complaint rate above the threshold alerts even below the volume that pauses. */
+	private void complaintRateAlert(Stats stats, Thresholds thresholds) {
+		if (stats.complained7d() > 0 && stats.delivered7d() > 0
+				&& (double) stats.complained7d() / stats.delivered7d() > thresholds.complaintPauseRate()) {
+			alerts.raise("COMPLAINT_RATE", stats.slug(), "Tenant " + stats.slug() + " complaint rate "
+					+ rate(stats.complained7d(), stats.delivered7d()) + " in 7 days (threshold "
+					+ thresholds.complaintPauseRate() + ")");
+		}
 	}
 
 	private Thresholds thresholds(String overrides) {

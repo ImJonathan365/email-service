@@ -333,6 +333,8 @@ Requiere el ámbito `templates:write` (FR-33).
 - **AC-23.5** — **(rev. 2026-10)** `variables` se sustituye por `{}` (y se registra `variables_purged_at`) `VARIABLES_RETENTION_DAYS` (default 7) días después de que el mensaje llegue a un estado terminal o final por tiempo. Las variables marcadas `x-sensitive` en el esquema se eliminan **al pasar a `SENT`** o a un estado terminal.
 - **AC-23.6** — **(rev. 2026-10; solo aplica si FR-30 se activa)** El contenido de los adjuntos (`email_attachment.content`) se elimina en cuanto el mensaje llega a `SENT` o a un estado terminal; los metadatos (nombre, tipo, tamaño, hash) se conservan hasta la purga del mensaje.
 - **AC-23.7** — **(rev. 2026-10)** `rendered_*` se vacía a los 30 días. Los eventos huérfanos (`tenant_id` nulo) se purgan a los 30 días.
+- **AC-23.8** — **(rev. 2026-10-12, owner)** Las purgas nunca borran mensajes `QUEUED` ni `SENDING`.
+- **AC-23.9** — **(rev. 2026-10-12, propuesta pendiente de confirmar por el owner)** Para AC-23.5, `DELIVERED` cuenta como final por tiempo igual que `SENT` (`SENT_FINAL_AFTER_HOURS` desde `sent_at`). `DELIVERED` es estable, no terminal: sin esto, sus variables no se purgarían nunca.
 
 ### FR-24 — Observabilidad (Must)
 

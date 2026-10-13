@@ -314,6 +314,45 @@
         },
         "type" : "object"
       },
+      "Request" : {
+        "properties" : {
+          "email" : {
+            "example" : "ana@example.com",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "reference" : {
+            "example" : "ARCO-2026-014",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          }
+        },
+        "required" : [ "email", "reference" ],
+        "type" : "object"
+      },
+      "Result" : {
+        "properties" : {
+          "copiesRemoved" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "deleted" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          },
+          "suppressionsAnonymized" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "Resume" : {
         "properties" : {
           "note" : {
@@ -528,6 +567,38 @@
         } ],
         "summary" : "Revoke an API key (AC-03.4)",
         "tags" : [ "Admin: API keys" ]
+      }
+    },
+    "/admin/v1/data-subjects/erase" : {
+      "post" : {
+        "operationId" : "erase",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Request"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Result"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Erase a data subject's messages, events and plain address (FR-29)",
+        "tags" : [ "Admin: data subjects" ]
       }
     },
     "/admin/v1/suppressions" : {

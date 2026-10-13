@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import com.emailservice.audit.Actor;
 import com.emailservice.audit.AuditAction;
 import com.emailservice.audit.AuditLog;
+import com.emailservice.common.alert.Alerts;
 import com.emailservice.common.api.ApiException;
 import com.emailservice.common.api.ErrorCode;
 import com.emailservice.common.web.Cidr;
@@ -48,13 +49,16 @@ class ApiKeyAuthenticator {
 
 	private final AuthFailuresByIp failures;
 
+	private final Alerts alerts;
+
 	ApiKeyAuthenticator(ApiKeyLookup lookup, AuditLog auditLog, MeterRegistry meterRegistry,
-			KnownKeyPrefixes knownPrefixes, AuthFailuresByIp failures) {
+			KnownKeyPrefixes knownPrefixes, AuthFailuresByIp failures, Alerts alerts) {
 		this.lookup = lookup;
 		this.auditLog = auditLog;
 		this.meterRegistry = meterRegistry;
 		this.knownPrefixes = knownPrefixes;
 		this.failures = failures;
+		this.alerts = alerts;
 	}
 
 	AuthenticatedApiKey authenticate(String authorization, InetAddress clientIp, String requestId) {
@@ -75,6 +79,8 @@ class ApiKeyAuthenticator {
 				auditLog.record(lookup.jdbc(), new Actor(Actor.Type.SYSTEM, "authentication", ip, requestId),
 						AuditAction.AUTHENTICATION_FAILURES_BY_IP, null, "ip", ip,
 						Map.of("threshold", failures.threshold(), "window", "1 minute"));
+				alerts.raise("AUTH_FAILURE_SPIKE", ip,
+						failures.threshold() + " failed authentications in a minute from " + ip);
 			}
 			throw ex;
 		}

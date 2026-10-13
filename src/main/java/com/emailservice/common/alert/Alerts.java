@@ -34,7 +34,8 @@ public class Alerts {
 		long now = clock.millis();
 		String key = alert + "|" + subject;
 		Long previous = lastEmitted.get(key);
-		if (previous != null && now - previous < DEDUPLICATION.toMillis()) {
+		// A clock that went backwards must not silence alerts until it catches up.
+		if (previous != null && now >= previous && now - previous < DEDUPLICATION.toMillis()) {
 			return false;
 		}
 		lastEmitted.put(key, now);

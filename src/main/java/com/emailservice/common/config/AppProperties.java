@@ -291,16 +291,27 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 	}
 
 	/** Queue and retry settings (FR-12, FR-13, ADR-0010). */
+	/**
+	 * The queue worker (FR-12, FR-13) and its maintenance tasks: retention of variables and
+	 * idempotency keys (FR-23), when a SENT message without events counts as final, and the queue
+	 * age that degrades health and raises an alert (AC-24.4).
+	 */
 	public record Worker(int concurrency, int pollIntervalMs, int maxAttempts, List<Integer> retryBackoffSeconds,
-			int lockTimeoutSeconds) {
+			int lockTimeoutSeconds, int variablesRetentionDays, int idempotencyRetentionHours, int sentFinalAfterHours,
+			int queueAgeAlertSeconds) {
 
 		/** Resend keeps idempotency keys for 24 h; every attempt must fall inside 23 h (AC-13.7). */
 		static final long RETRY_WINDOW_SECONDS = 23 * 3_600;
 
-		static final Worker DEFAULTS = new Worker(4, 1_000, 6, List.of(60, 300, 900, 3_600, 21_600), 60);
+		static final Worker DEFAULTS = new Worker(4, 1_000, 6, List.of(60, 300, 900, 3_600, 21_600), 60, 7, 24, 72,
+				300);
 
 		public Worker {
 			retryBackoffSeconds = retryBackoffSeconds == null ? List.of() : List.copyOf(retryBackoffSeconds);
+			variablesRetentionDays = variablesRetentionDays == 0 ? 7 : variablesRetentionDays;
+			idempotencyRetentionHours = idempotencyRetentionHours == 0 ? 24 : idempotencyRetentionHours;
+			sentFinalAfterHours = sentFinalAfterHours == 0 ? 72 : sentFinalAfterHours;
+			queueAgeAlertSeconds = queueAgeAlertSeconds == 0 ? 300 : queueAgeAlertSeconds;
 		}
 
 		private void validate(Mail mail, List<String> problems) {
@@ -309,6 +320,19 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			}
 			if (pollIntervalMs < 100 || pollIntervalMs > 60_000) {
 				problems.add("WORKER_POLL_INTERVAL_MS must be between 100 and 60000");
+			}
+			if (variablesRetentionDays < 1 || variablesRetentionDays > 90) {
+				problems.add("VARIABLES_RETENTION_DAYS must be between 1 and 90");
+			}
+			// A repeat inside the window must still find its original message (AC-08.5).
+			if (idempotencyRetentionHours < 24) {
+				problems.add("IDEMPOTENCY_RETENTION_HOURS must be at least 24");
+			}
+			if (sentFinalAfterHours < 1) {
+				problems.add("SENT_FINAL_AFTER_HOURS must be at least 1");
+			}
+			if (queueAgeAlertSeconds < 30) {
+				problems.add("QUEUE_AGE_ALERT_SECONDS must be at least 30");
 			}
 			if (retryBackoffSeconds.isEmpty() || retryBackoffSeconds.stream().anyMatch(s -> s == null || s <= 0)) {
 				problems.add("RETRY_BACKOFF_SECONDS must be a list of positive seconds");
