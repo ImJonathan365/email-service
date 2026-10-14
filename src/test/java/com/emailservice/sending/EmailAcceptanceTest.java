@@ -97,13 +97,11 @@ class EmailAcceptanceTest extends IntegrationTest {
 	}
 
 	@Test
-	void ac_07_6_attachmentsAndSendAtAreRejectedWithExplicitReasons() throws Exception {
-		HttpResponse<String> response = a.send(
-				a.body("\"attachments\": [{\"filename\": \"x.pdf\"}], \"sendAt\": \"2030-01-01T00:00:00Z\""), null);
+	void ac_07_6_attachmentsAreRejectedWithAnExplicitReason() throws Exception {
+		// sendAt is supported since H8 (FR-31, SendAtTest); attachments stay out of the MVP (ADR-0015).
+		HttpResponse<String> response = a.send(a.body("\"attachments\": [{\"filename\": \"x.pdf\"}]"), null);
 		assertThat(response.statusCode()).isEqualTo(422);
-		assertThat(response.body()).contains("\"field\":\"attachments\"")
-			.contains("\"field\":\"sendAt\"")
-			.contains("is not supported yet: scheduled sending (FR-31) arrives in milestone H8");
+		assertThat(response.body()).contains("\"field\":\"attachments\"").doesNotContain("\"field\":\"sendAt\"");
 		assertThat(SendingTestSupport.countMessages(a.tenant.id())).isZero();
 	}
 

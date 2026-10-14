@@ -45,7 +45,7 @@ class EmailQueries {
 				       m.from_email, m.tags, m.metadata::text AS metadata, m.attempts, m.provider,
 				       m.provider_message_id, m.attempt_log -> -1 ->> 'code' AS last_error, m.failure_code,
 				       m.failure_detail, m.created_at, m.sent_at, m.delivered_at, m.first_opened_at,
-				       m.first_clicked_at, m.open_count, m.click_count, ten.store_rendered_content,
+				       m.first_clicked_at, m.open_count, m.click_count, m.send_at, ten.store_rendered_content,
 				       m.rendered_subject, m.rendered_html, m.rendered_text
 				FROM email_message m
 				JOIN template t ON t.tenant_id = m.tenant_id AND t.id = m.template_id
@@ -150,7 +150,7 @@ class EmailQueries {
 				rs.getString("provider_message_id"), rs.getString("last_error"), rs.getString("failure_code"),
 				rs.getString("failure_detail"), instant(rs, "created_at"), instant(rs, "sent_at"),
 				instant(rs, "delivered_at"), instant(rs, "first_opened_at"), instant(rs, "first_clicked_at"),
-				rs.getInt("open_count"), rs.getInt("click_count"),
+				rs.getInt("open_count"), rs.getInt("click_count"), instant(rs, "send_at"),
 				showRendered ? rs.getString("rendered_subject") : null,
 				showRendered ? rs.getString("rendered_html") : null, showRendered ? rs.getString("rendered_text") : null,
 				events);

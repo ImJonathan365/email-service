@@ -21,7 +21,7 @@ class ProviderConfigTest {
 		return new AppProperties(AppEnv.LOCAL, AppRole.WORKER,
 				new AppProperties.Db("jdbc:postgresql://localhost/db", credentials, credentials, credentials), null, null,
 				null, new AppProperties.Mail(provider, "localhost", 1025, false, 3_000, 10_000),
-				new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "accept", List.of(), 262_144), null, null);
+				new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "accept", List.of(), 262_144, 30, 60, 100, 1_048_576), null, null);
 	}
 
 	ApplicationContextRunner runner(String provider) {

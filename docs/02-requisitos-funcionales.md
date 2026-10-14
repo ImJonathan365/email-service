@@ -352,6 +352,10 @@ Requiere el ámbito `templates:write` (FR-33).
 ### FR-26 — Cancelación de un mensaje encolado (Could)
 
 - **AC-26.1** — `POST /v1/emails/{id}/cancel` sobre un mensaje `QUEUED` lo pasa a `CANCELED`; sobre cualquier otro estado, `409 MESSAGE_NOT_CANCELABLE`. Requiere `emails:send`.
+  - **(rev. 2026-10-13, owner, H8)** Nunca cancela un mensaje que el worker ya tomó. La fila se bloquea y el `UPDATE` es condicional (`status = 'QUEUED'`): si una toma está en curso, la cancelación la espera, ve `SENDING` y responde `409`.
+  - Un id inexistente o de otro tenant → `404 MESSAGE_NOT_FOUND` (RLS). Cancelar dos veces → `409` la segunda.
+  - Funciona aunque el tenant esté en pausa.
+  - El mensaje queda `CANCELED` con `failureCode = CANCELED_BY_CLIENT`, sin sus variables `x-sensitive` (AC-23.5), y así aparece en `GET /v1/emails/{id}`.
 
 ### FR-27 — Contenido inline sin plantilla (Won't)
 
@@ -383,6 +387,9 @@ Agrupaba adjuntos, envíos programados y webhooks salientes como `Won't`. Se div
 ### FR-31 — Envío diferido `sendAt` (Should, nuevo)
 
 - **AC-31.1** — `sendAt` (ISO-8601 con zona) fija `next_attempt_at`; debe estar entre `now()` y `now() + SEND_AT_MAX_DAYS` (default 30); si no, `422 SEND_AT_OUT_OF_RANGE`.
+  - **(rev. 2026-10-13, owner)** Hasta `SEND_AT_PAST_TOLERANCE_SECONDS` en el pasado (default 60, configurable de 0 a 600) se trata como envío inmediato, para no rechazar por latencia o desfase de relojes un `sendAt` que significa "ahora". Más allá, `422 SEND_AT_OUT_OF_RANGE`.
+  - Las fronteras se miden con el `Clock` de la aplicación (`05`, "Fuente de la hora").
+  - Una fecha sin zona o que no es fecha → `422 VALIDATION_ERROR`.
 - **AC-31.2** — La versión de plantilla se fija al **aceptar**, no al enviar (documentado en `07`).
 - **AC-31.3** — Un mensaje diferido se puede cancelar con FR-26 hasta que se tome.
 - **AC-31.4** — La ventana de reintentos de AC-13.7 empieza a contar en el primer intento, no en la aceptación.
@@ -416,6 +423,13 @@ Una tarea del worker evalúa cada 5 minutos, por tenant:
 - **AC-35.2** — Respuesta `200` con `results[]` en el mismo orden: `{ index, httpStatus, id?, status?, code? }`. Cada elemento se valida por separado: un elemento inválido no invalida a los demás.
 - **AC-35.3** — Los elementos aceptados se insertan en **una** transacción; la idempotencia y el rate limit se aplican por elemento (AC-21.6). Si el rate limit se agota a mitad de lote, los elementos restantes reciben `429 RATE_LIMITED`.
 - **AC-35.4** — Los mensajes de un lote heredan la prioridad de su categoría (FR-36); un lote nunca adelanta a mensajes `SECURITY`.
+- **AC-35.5** — **(rev. 2026-10-13, owner, H8)** Aclaraciones del lote:
+  - **Transacción:** cada elemento va en su propio *savepoint* dentro de la transacción única. Uno rechazado deshace solo lo suyo, incluido su incremento de cuota. Un fallo de base de datos revierte el lote entero (`5xx`), sin aceptar ninguno.
+  - **Tamaño:** cuerpo de más de `MAX_BATCH_BYTES` → `413 PAYLOAD_TOO_LARGE`. Lista vacía o de más de `MAX_BATCH_ITEMS` → `422 VALIDATION_ERROR` para el lote entero.
+  - **Elemento sin `idempotencyKey`** → `422` en ese elemento.
+  - **Tenant en pausa:** el lote entero responde `403 TENANT_SENDING_PAUSED`, sin procesar ningún elemento (AC-34.4).
+  - **Rate limit agotado:** los elementos restantes reciben `429`, salvo las repeticiones idempotentes, que devuelven su resultado original sin consumir cuota (AC-08.7).
+  - **Anomalías:** cada elemento aceptado cuenta para la anomalía de volumen (AC-34.1).
 
 ### FR-36 — Categoría de plantilla y prioridad en la cola (Must, nuevo)
 

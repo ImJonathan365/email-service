@@ -53,10 +53,24 @@ class EmailController {
 
 	private final MeterRegistry meters;
 
-	EmailController(AcceptanceService acceptance, EmailQueries queries, MeterRegistry meters) {
+	private final Cancellation cancellation;
+
+	private final BatchAcceptance batches;
+
+	EmailController(AcceptanceService acceptance, EmailQueries queries, MeterRegistry meters,
+			Cancellation cancellation, BatchAcceptance batches) {
 		this.acceptance = acceptance;
 		this.queries = queries;
 		this.meters = meters;
+		this.cancellation = cancellation;
+		this.batches = batches;
+	}
+
+	@PostMapping("/batch")
+	@RequiresScope(Scope.EMAILS_SEND)
+	@Operation(summary = "Send up to MAX_BATCH_ITEMS emails; one result per item, in order (FR-35)")
+	BatchViews.Response sendBatch(@RequestBody BatchViews.Request body, HttpServletRequest request) {
+		return batches.accept(AuthenticatedApiKey.from(request).tenantId(), body);
 	}
 
 	@PostMapping
@@ -74,6 +88,16 @@ class EmailController {
 			.register(meters));
 		MDC.put("messageId", outcome.body().id().toString());
 		return ResponseEntity.status(outcome.created() ? HttpStatus.ACCEPTED : HttpStatus.OK).body(outcome.body());
+	}
+
+	@PostMapping("/{id}/cancel")
+	@RequiresScope(Scope.EMAILS_SEND)
+	@Transactional
+	@Operation(summary = "Cancel a message that is still QUEUED, including a scheduled one (FR-26, AC-31.3)")
+	EmailViews.Detail cancel(@PathVariable UUID id, HttpServletRequest request) {
+		UUID tenantId = AuthenticatedApiKey.from(request).tenantId();
+		cancellation.cancel(tenantId, id);
+		return queries.detail(tenantId, id).orElseThrow();
 	}
 
 	@GetMapping("/{id}")

@@ -33,6 +33,16 @@ class WebConfig {
 		return registration;
 	}
 
+	/** A batch carries up to MAX_BATCH_ITEMS sends, so it gets MAX_BATCH_BYTES (FR-35). */
+	@Bean
+	FilterRegistrationBean<RequestSizeFilter> batchRequestSizeFilter(AppProperties properties, ProblemWriter problems) {
+		FilterRegistrationBean<RequestSizeFilter> registration = new FilterRegistrationBean<>(
+				new RequestSizeFilter(properties.sending().maxBatchBytes(), problems));
+		registration.addUrlPatterns("/v1/emails/batch");
+		registration.setOrder(RequestIdFilter.ORDER + 5);
+		return registration;
+	}
+
 	@Bean
 	FilterRegistrationBean<RequestSizeFilter> templateRequestSizeFilter(ProblemWriter problems) {
 		FilterRegistrationBean<RequestSizeFilter> registration = new FilterRegistrationBean<>(

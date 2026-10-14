@@ -3,6 +3,7 @@ package com.emailservice.sending;
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
@@ -50,13 +51,13 @@ class MessageRepository {
 	/** What an idempotent repeat needs to answer with the original message (AC-08.1). */
 	record Stored(UUID id, String requestHash, String status, String templateKey, int templateVersion, String locale,
 			String toEmail, List<String> cc, List<String> bcc, String failureCode, String failureDetail,
-			Instant createdAt) {
+			Instant sendAt, Instant createdAt) {
 	}
 
 	Optional<Stored> findByIdempotencyKey(UUID tenantId, String idempotencyKey) {
 		return jdbc.sql("""
 				SELECT m.id, m.request_hash, m.status, t.key AS template_key, v.version, m.locale, m.to_email, m.cc,
-				       m.bcc, m.failure_code, m.failure_detail, m.created_at
+				       m.bcc, m.failure_code, m.failure_detail, m.send_at, m.created_at
 				FROM email_message m
 				JOIN template t ON t.tenant_id = m.tenant_id AND t.id = m.template_id
 				JOIN template_version v ON v.tenant_id = m.tenant_id AND v.id = m.template_version_id
@@ -67,7 +68,8 @@ class MessageRepository {
 			.query((rs, row) -> new Stored(rs.getObject("id", UUID.class), rs.getString("request_hash"),
 					rs.getString("status"), rs.getString("template_key"), rs.getInt("version"), rs.getString("locale"),
 					rs.getString("to_email"), strings(rs.getArray("cc")), strings(rs.getArray("bcc")),
-					rs.getString("failure_code"), rs.getString("failure_detail"), instant(rs, "created_at")))
+					rs.getString("failure_code"), rs.getString("failure_detail"), instant(rs, "send_at"),
+					instant(rs, "created_at")))
 			.optional();
 	}
 
@@ -92,7 +94,7 @@ class MessageRepository {
 			UUID templateVersionId, String category, int priority, String locale, String toEmail, String toName,
 			List<String> cc, List<String> bcc, String fromEmail, String fromName, String replyTo, String variables,
 			String status, String failureCode, String failureDetail, List<String> tags, String metadata,
-			boolean trackingEnabled) {
+			boolean trackingEnabled, Instant sendAt) {
 	}
 
 	/** Empty when a concurrent request with the same idempotency key won the insert (AC-08.4). */
@@ -101,12 +103,12 @@ class MessageRepository {
 				INSERT INTO email_message (id, tenant_id, idempotency_key, request_hash, template_id,
 				    template_version_id, category, priority, locale, to_email, to_name, cc, bcc, from_email, from_name,
 				    reply_to, variables, status, failure_code, failure_detail, finalized_at, tags, metadata,
-				    tracking_enabled, next_attempt_at)
+				    tracking_enabled, send_at, next_attempt_at)
 				VALUES (:id, :tenantId, :idempotencyKey, :requestHash, :templateId, :templateVersionId, :category,
 				    :priority, :locale, :toEmail, :toName, CAST(:cc AS text[]), CAST(:bcc AS text[]), :fromEmail,
 				    :fromName, :replyTo, CAST(:variables AS jsonb), :status, :failureCode, :failureDetail,
 				    CASE WHEN :status = 'FAILED' THEN now() END, CAST(:tags AS text[]), CAST(:metadata AS jsonb),
-				    :tracking, now())
+				    :tracking, CAST(:sendAt AS timestamptz), coalesce(CAST(:sendAt AS timestamptz), now()))
 				ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 				RETURNING created_at
 				""")
@@ -133,6 +135,7 @@ class MessageRepository {
 			.param("tags", m.tags().isEmpty() ? null : m.tags().toArray(String[]::new))
 			.param("metadata", m.metadata())
 			.param("tracking", m.trackingEnabled())
+			.param("sendAt", m.sendAt() == null ? null : Timestamp.from(m.sendAt()))
 			.query((rs, row) -> instant(rs, "created_at"))
 			.optional();
 	}

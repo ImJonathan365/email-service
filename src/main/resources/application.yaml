@@ -90,6 +90,10 @@ app:
     suppression-reject-mode: ${SUPPRESSION_REJECT_MODE:accept}
     allowed-recipient-domains: ${ALLOWED_RECIPIENT_DOMAINS:}
     max-request-bytes: ${MAX_REQUEST_BYTES:262144}
+    send-at-max-days: ${SEND_AT_MAX_DAYS:30}
+    send-at-past-tolerance-seconds: ${SEND_AT_PAST_TOLERANCE_SECONDS:60}
+    max-batch-items: ${MAX_BATCH_ITEMS:100}
+    max-batch-bytes: ${MAX_BATCH_BYTES:1048576}
   worker:
     concurrency: ${WORKER_CONCURRENCY:4}
     poll-interval-ms: ${WORKER_POLL_INTERVAL_MS:1000}

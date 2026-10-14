@@ -25,6 +25,7 @@ final class EmailViews {
 			int attempts, String provider, String providerMessageId, String lastError, String failureCode,
 			String failureDetail, Instant createdAt, Instant sentAt, Instant deliveredAt, Instant firstOpenedAt,
 			Instant firstClickedAt, int openCount, int clickCount,
+			@JsonInclude(JsonInclude.Include.NON_NULL) Instant sendAt,
 			@JsonInclude(JsonInclude.Include.NON_NULL) String renderedSubject,
 			@JsonInclude(JsonInclude.Include.NON_NULL) String renderedHtml,
 			@JsonInclude(JsonInclude.Include.NON_NULL) String renderedText, List<Event> events) {
