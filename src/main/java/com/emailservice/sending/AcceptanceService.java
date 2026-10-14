@@ -170,6 +170,19 @@ class AcceptanceService {
 				createdAt.get()), true);
 	}
 
+	/**
+	 * Only the idempotency answer: the original result for a repeat (or 409 for the same key with
+	 * another body), empty for a new request. Nothing is validated or counted (AC-08.7).
+	 */
+	Optional<Outcome> repeatOnly(UUID tenantId, SendEmailRequest request, String idempotencyKey) {
+		if (!PRINTABLE_ASCII.matcher(idempotencyKey).matches()) {
+			throw ApiException.validation(List.of(new FieldError("idempotencyKey",
+					"must be 1 to " + MAX_IDEMPOTENCY_KEY + " printable ASCII characters")));
+		}
+		return messages.findByIdempotencyKey(tenantId, idempotencyKey)
+			.map(original -> repeat(original, requestHash(request), request));
+	}
+
 	private Outcome repeat(MessageRepository.Stored original, String requestHash, SendEmailRequest request) {
 		if (!original.requestHash().equals(requestHash)) {
 			throw new ApiException(ErrorCode.IDEMPOTENCY_KEY_REUSED,

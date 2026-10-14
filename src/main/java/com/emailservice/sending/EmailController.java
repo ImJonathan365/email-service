@@ -55,12 +55,22 @@ class EmailController {
 
 	private final Cancellation cancellation;
 
+	private final BatchAcceptance batches;
+
 	EmailController(AcceptanceService acceptance, EmailQueries queries, MeterRegistry meters,
-			Cancellation cancellation) {
+			Cancellation cancellation, BatchAcceptance batches) {
 		this.acceptance = acceptance;
 		this.queries = queries;
 		this.meters = meters;
 		this.cancellation = cancellation;
+		this.batches = batches;
+	}
+
+	@PostMapping("/batch")
+	@RequiresScope(Scope.EMAILS_SEND)
+	@Operation(summary = "Send up to MAX_BATCH_ITEMS emails; one result per item, in order (FR-35)")
+	BatchViews.Response sendBatch(@RequestBody BatchViews.Request body, HttpServletRequest request) {
+		return batches.accept(AuthenticatedApiKey.from(request).tenantId(), body);
 	}
 
 	@PostMapping

@@ -2,6 +2,19 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-13 — H8, parte 2: envío por lote (H8 completo)
+
+- **Hecho:** `POST /v1/emails/batch` (FR-35).
+  - **Límites:** hasta `MAX_BATCH_ITEMS` (100) y `MAX_BATCH_BYTES` (1 MiB, `413`). Cada elemento es un cuerpo de `POST /v1/emails` más `idempotencyKey` obligatorio.
+  - **Respuesta:** `200` con `results[]` en orden.
+  - **Transacción:** una sola, con un *savepoint* por elemento. Un elemento rechazado deshace solo lo suyo, incluido su incremento de cuota, y un fallo de BD revierte el lote entero.
+  - **Idempotencia y rate limit por elemento:** con el límite agotado, el resto recibe `429`, salvo las repeticiones idempotentes, que devuelven su resultado original (owner).
+  - **Tenant en pausa:** `403` al lote entero.
+  - **Prioridad:** cada mensaje hereda la de su categoría; un lote `NOTICE` no adelanta a `SECURITY`.
+  - **Anomalías:** cada elemento aceptado cuenta para la anomalía de volumen (un lote puede disparar la pausa).
+  - **`sendAt` por elemento.**
+- **Tests:** elementos independientes y en orden, límites de 100/101 y de tamaño, repeticiones dentro y entre lotes, límite agotado a mitad de lote, repetición tras agotarse el límite, pausa, prioridad, `sendAt` por elemento, reversión total ante un fallo de BD y un lote que dispara la anomalía de volumen.
+
 ## 2026-10-13 — H8, parte 1: envío programado y cancelación
 
 - **Hecho:**

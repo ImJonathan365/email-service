@@ -452,6 +452,64 @@
         "required" : [ "email" ],
         "type" : "object"
       },
+      "Request" : {
+        "properties" : {
+          "items" : {
+            "description" : "Up to MAX_BATCH_ITEMS items, each a POST /v1/emails body plus a required idempotencyKey",
+            "items" : {
+              "$ref" : "#/components/schemas/JsonNode"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Response" : {
+        "properties" : {
+          "results" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Result"
+            },
+            "type" : "array"
+          }
+        },
+        "type" : "object"
+      },
+      "Result" : {
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "droppedRecipients" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "failureCode" : {
+            "type" : "string"
+          },
+          "httpStatus" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "index" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "suppressionReason" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "SendEmailRequest" : {
         "properties" : {
           "bcc" : {
@@ -921,6 +979,38 @@
           "apiKey" : [ ]
         } ],
         "summary" : "Send a transactional email: 202 when queued, 200 for an idempotent repeat (FR-07, FR-08)",
+        "tags" : [ "Emails" ]
+      }
+    },
+    "/v1/emails/batch" : {
+      "post" : {
+        "operationId" : "sendBatch",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Request"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Response"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Send up to MAX_BATCH_ITEMS emails; one result per item, in order (FR-35)",
         "tags" : [ "Emails" ]
       }
     },

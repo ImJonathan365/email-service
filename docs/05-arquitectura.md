@@ -305,7 +305,7 @@ Quedan fuera de la regla:
 | `IDEMPOTENCY_RETENTION_HOURS` | `24` | AC-08.5. **(rev. 2026-10-12)** Al menos 24: una repetición dentro de la ventana debe encontrar su mensaje |
 | `SENT_FINAL_AFTER_HOURS` | `72` | `SENT` sin eventos = final por tiempo |
 | `MAX_REQUEST_BYTES` | `262144` | Tamaño de payload |
-| `MAX_BATCH_ITEMS` / `MAX_BATCH_BYTES` | `100` / `1048576` | Endpoint de lote |
+| `MAX_BATCH_ITEMS` / `MAX_BATCH_BYTES` | `100` / `1048576` | Endpoint de lote. **(rev. 2026-10-13)** 1–1000 elementos; el tamaño no puede ser menor que `MAX_REQUEST_BYTES` |
 | `SEND_AT_MAX_DAYS` | `30` | FR-31 (1–365) |
 | `SEND_AT_PAST_TOLERANCE_SECONDS` | `60` | **(rev. 2026-10-13)** Cuánto en el pasado sigue contando como "ahora" (0–600) |
 | `SUPPORTED_LOCALES` | `es-CR,en` | FR-37 |

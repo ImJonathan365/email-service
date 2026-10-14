@@ -168,6 +168,17 @@ Content-Type: application/json
 ```
 
 - Máximo 100 elementos y 1 MB; cada elemento admite `locale` y `sendAt`. `idempotencyKey` es obligatorio por elemento (la cabecera `Idempotency-Key` se ignora en este endpoint).
+- **(rev. 2026-10-13, H8)** Detalles del lote (AC-35.5 en `02`):
+  - **Errores del lote entero:**
+    - cuerpo de más de `MAX_BATCH_BYTES` → `413 PAYLOAD_TOO_LARGE`;
+    - lista vacía o de más de `MAX_BATCH_ITEMS` → `422 VALIDATION_ERROR`;
+    - tenant en pausa → `403 TENANT_SENDING_PAUSED`;
+    - fallo de base de datos → `5xx`, sin aceptar ningún elemento.
+  - **Resultado por elemento:**
+    - `202` si se creó, `200` si es una repetición idempotente, o el código de error que daría `POST /v1/emails` (`422`, `409`, `429`…);
+    - un elemento sin `idempotencyKey`, o que no es un objeto, → `422` en ese elemento.
+  - **Campos opcionales del resultado:** `failureCode` y `suppressionReason` (destinatario suprimido) y `droppedRecipients`.
+  - **Rate limit agotado a mitad de lote:** el resto recibe `429`, salvo las repeticiones idempotentes, que devuelven su resultado original.
 - Los elementos aceptados se insertan en una transacción (medido: ~0,25 ms/mensaje frente a ~0,75 ms con una transacción por mensaje).
 - No es una herramienta de campañas: los envíos `NOTICE` siguen sujetos a cuota, a la detección de anomalías y a la prioridad más baja (ADR-0013).
 
@@ -463,7 +474,7 @@ svix-signature: v1,k8s9…
 | 409 | `TEMPLATE_KEY_TAKEN` / `TENANT_SLUG_TAKEN` | Identificador en uso |
 | 409 | `VERSION_IMMUTABLE` | Edición de versión publicada |
 | 409 | `MESSAGE_NOT_CANCELABLE` | El mensaje ya no está en cola |
-| 413 | `PAYLOAD_TOO_LARGE` | Supera `MAX_REQUEST_BYTES` (o el límite de lote) |
+| 413 | `PAYLOAD_TOO_LARGE` | Supera `MAX_REQUEST_BYTES` o, en `/v1/emails/batch`, `MAX_BATCH_BYTES` |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | **(rev. 2026-10-06)** El cuerpo no es `application/json` |
 | 422 | `VALIDATION_ERROR` | Campos inválidos (incluye `errors[]` por campo) |
 | 422 | `INVALID_EMAIL_ADDRESS` | Dirección mal formada |

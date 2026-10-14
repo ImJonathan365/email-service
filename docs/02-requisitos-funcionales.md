@@ -423,6 +423,13 @@ Una tarea del worker evalúa cada 5 minutos, por tenant:
 - **AC-35.2** — Respuesta `200` con `results[]` en el mismo orden: `{ index, httpStatus, id?, status?, code? }`. Cada elemento se valida por separado: un elemento inválido no invalida a los demás.
 - **AC-35.3** — Los elementos aceptados se insertan en **una** transacción; la idempotencia y el rate limit se aplican por elemento (AC-21.6). Si el rate limit se agota a mitad de lote, los elementos restantes reciben `429 RATE_LIMITED`.
 - **AC-35.4** — Los mensajes de un lote heredan la prioridad de su categoría (FR-36); un lote nunca adelanta a mensajes `SECURITY`.
+- **AC-35.5** — **(rev. 2026-10-13, owner, H8)** Aclaraciones del lote:
+  - **Transacción:** cada elemento va en su propio *savepoint* dentro de la transacción única. Uno rechazado deshace solo lo suyo, incluido su incremento de cuota. Un fallo de base de datos revierte el lote entero (`5xx`), sin aceptar ninguno.
+  - **Tamaño:** cuerpo de más de `MAX_BATCH_BYTES` → `413 PAYLOAD_TOO_LARGE`. Lista vacía o de más de `MAX_BATCH_ITEMS` → `422 VALIDATION_ERROR` para el lote entero.
+  - **Elemento sin `idempotencyKey`** → `422` en ese elemento.
+  - **Tenant en pausa:** el lote entero responde `403 TENANT_SENDING_PAUSED`, sin procesar ningún elemento (AC-34.4).
+  - **Rate limit agotado:** los elementos restantes reciben `429`, salvo las repeticiones idempotentes, que devuelven su resultado original sin consumir cuota (AC-08.7).
+  - **Anomalías:** cada elemento aceptado cuenta para la anomalía de volumen (AC-34.1).
 
 ### FR-36 — Categoría de plantilla y prioridad en la cola (Must, nuevo)
 
