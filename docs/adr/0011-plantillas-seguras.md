@@ -30,7 +30,7 @@ ADR-0005 decidió plantillas en la BD, versionadas, inmutables al publicar, fija
    - prohíbe las etiquetas `<script>`, `<iframe>`, `<object>`, `<embed>` y `<form>`;
    - exige que toda variable en `href`/`src` esté declarada con `format: uri`.
 5. **Escapado por contexto:** HTML en `htmlTemplate`; ninguno en `subjectTemplate` y `textTemplate` (el asunto además pierde CR/LF).
-6. **URL en variables:** en la aceptación, toda variable `format: uri` debe ser `https` y su host debe pertenecer a `tenant.allowedLinkHosts` → si no, `422 UNSAFE_URL`.
+6. **URL en variables:** en la aceptación, toda variable `format: uri` debe ser `https` y su host debe pertenecer a `tenant.allowedLinkHosts` → si no, `422 UNSAFE_URL`. Solo con `APP_ENV=local` se aceptan además `http`/`https` a `localhost` y `*.localhost` (ADR-0021).
 7. **Esquema obligatorio para publicar**, con un subconjunto de JSON Schema definido (`06` §3.3), incluido `x-sensitive` para las variables que se purgan al enviar y se redactan en el contenido guardado.
 8. **Render determinista:** no hay helper de "fecha actual"; formateo con `tenant.locale`/`tenant.timezone` explícitos.
 9. **Render también al aceptar** (resultado descartado): los errores de render son `422` síncronos.
