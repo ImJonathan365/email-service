@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -23,7 +24,7 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 		Objects.requireNonNull(env, "APP_ENV is required");
 		Objects.requireNonNull(role, "APP_ROLE is required");
 		Objects.requireNonNull(db, "DB_* configuration is required");
-		http = http == null ? new Http(List.of()) : http;
+		http = http == null ? new Http(List.of(), 30) : http;
 		admin = admin == null ? new Admin(List.of()) : admin;
 		tenancy = tenancy == null ? Tenancy.DEFAULTS : tenancy;
 		mail = mail == null ? Mail.DEFAULTS : mail;
@@ -51,7 +52,7 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			mail.validate(env, problems);
 			sending.validate(env, problems);
 			worker.validate(mail, problems);
-			provider.validate(env, mail, problems);
+			provider.validate(env, role, mail, problems);
 		}
 		if (!problems.isEmpty()) {
 			throw new IllegalStateException("Invalid configuration for APP_ENV=%s APP_ROLE=%s: %s"
@@ -97,11 +98,16 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 	}
 
-	/** TRUSTED_PROXIES: proxies whose X-Forwarded-For is believed (AC-33.3). */
-	public record Http(List<String> trustedProxies) {
+	/**
+	 * TRUSTED_PROXIES: proxies whose X-Forwarded-For is believed (AC-33.3).
+	 * AUTH_FAILURES_PER_MINUTE_PER_IP: past it, requests from that IP without a known key prefix get
+	 * 429 without a database lookup (docs/08 §4).
+	 */
+	public record Http(List<String> trustedProxies, int authFailuresPerMinutePerIp) {
 
 		public Http {
 			trustedProxies = trimmed(trustedProxies);
+			authFailuresPerMinutePerIp = authFailuresPerMinutePerIp == 0 ? 30 : authFailuresPerMinutePerIp;
 		}
 
 		public List<Cidr> trustedProxyRanges() {
@@ -116,6 +122,9 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 				catch (IllegalArgumentException ex) {
 					problems.add("TRUSTED_PROXIES has an invalid CIDR: " + proxy);
 				}
+			}
+			if (authFailuresPerMinutePerIp < 1) {
+				problems.add("AUTH_FAILURES_PER_MINUTE_PER_IP must be at least 1");
 			}
 		}
 
@@ -149,17 +158,25 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 	}
 
-	/** Defaults applied to new tenants (AC-02.5) and the locales templates may use (FR-37). */
+	/**
+	 * Defaults applied to new tenants (AC-02.5), the locales templates may use (FR-37) and the
+	 * anomaly thresholds of FR-34, which a tenant's anomalyOverrides can adjust (AC-34.5).
+	 */
 	public record Tenancy(int defaultRateLimitPerMinute, int defaultDailyQuota, int defaultRetentionDays,
-			List<String> supportedLocales) {
+			List<String> supportedLocales, double anomalyVolumeMultiplier, int anomalyMinHourly, double bouncePauseRate,
+			double complaintPauseRate) {
 
 		// The template_version.locale CHECK constraint bounds what can ever be configured.
 		static final Set<String> KNOWN_LOCALES = Set.of("es-CR", "en");
 
-		static final Tenancy DEFAULTS = new Tenancy(60, 1000, 90, List.of("es-CR", "en"));
+		static final Tenancy DEFAULTS = new Tenancy(60, 1000, 90, List.of("es-CR", "en"), 3, 50, 0.04, 0.001);
 
 		public Tenancy {
 			supportedLocales = trimmed(supportedLocales);
+			anomalyVolumeMultiplier = anomalyVolumeMultiplier == 0 ? 3 : anomalyVolumeMultiplier;
+			anomalyMinHourly = anomalyMinHourly == 0 ? 50 : anomalyMinHourly;
+			bouncePauseRate = bouncePauseRate == 0 ? 0.04 : bouncePauseRate;
+			complaintPauseRate = complaintPauseRate == 0 ? 0.001 : complaintPauseRate;
 		}
 
 		private void validate(List<String> problems) {
@@ -174,6 +191,12 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			}
 			if (supportedLocales.isEmpty() || !KNOWN_LOCALES.containsAll(supportedLocales)) {
 				problems.add("SUPPORTED_LOCALES must be a non-empty subset of " + KNOWN_LOCALES);
+			}
+			if (anomalyVolumeMultiplier < 1 || anomalyMinHourly < 1) {
+				problems.add("ANOMALY_VOLUME_MULTIPLIER and ANOMALY_MIN_HOURLY must be at least 1");
+			}
+			if (!(bouncePauseRate > 0 && bouncePauseRate < 1 && complaintPauseRate > 0 && complaintPauseRate < 1)) {
+				problems.add("BOUNCE_PAUSE_RATE and COMPLAINT_PAUSE_RATE must be between 0 and 1");
 			}
 		}
 
@@ -268,16 +291,27 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 	}
 
 	/** Queue and retry settings (FR-12, FR-13, ADR-0010). */
+	/**
+	 * The queue worker (FR-12, FR-13) and its maintenance tasks: retention of variables and
+	 * idempotency keys (FR-23), when a SENT message without events counts as final, and the queue
+	 * age that degrades health and raises an alert (AC-24.4).
+	 */
 	public record Worker(int concurrency, int pollIntervalMs, int maxAttempts, List<Integer> retryBackoffSeconds,
-			int lockTimeoutSeconds) {
+			int lockTimeoutSeconds, int variablesRetentionDays, int idempotencyRetentionHours, int sentFinalAfterHours,
+			int queueAgeAlertSeconds) {
 
 		/** Resend keeps idempotency keys for 24 h; every attempt must fall inside 23 h (AC-13.7). */
 		static final long RETRY_WINDOW_SECONDS = 23 * 3_600;
 
-		static final Worker DEFAULTS = new Worker(4, 1_000, 6, List.of(60, 300, 900, 3_600, 21_600), 60);
+		static final Worker DEFAULTS = new Worker(4, 1_000, 6, List.of(60, 300, 900, 3_600, 21_600), 60, 7, 24, 72,
+				300);
 
 		public Worker {
 			retryBackoffSeconds = retryBackoffSeconds == null ? List.of() : List.copyOf(retryBackoffSeconds);
+			variablesRetentionDays = variablesRetentionDays == 0 ? 7 : variablesRetentionDays;
+			idempotencyRetentionHours = idempotencyRetentionHours == 0 ? 24 : idempotencyRetentionHours;
+			sentFinalAfterHours = sentFinalAfterHours == 0 ? 72 : sentFinalAfterHours;
+			queueAgeAlertSeconds = queueAgeAlertSeconds == 0 ? 300 : queueAgeAlertSeconds;
 		}
 
 		private void validate(Mail mail, List<String> problems) {
@@ -286,6 +320,19 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			}
 			if (pollIntervalMs < 100 || pollIntervalMs > 60_000) {
 				problems.add("WORKER_POLL_INTERVAL_MS must be between 100 and 60000");
+			}
+			if (variablesRetentionDays < 1 || variablesRetentionDays > 90) {
+				problems.add("VARIABLES_RETENTION_DAYS must be between 1 and 90");
+			}
+			// A repeat inside the window must still find its original message (AC-08.5).
+			if (idempotencyRetentionHours < 24) {
+				problems.add("IDEMPOTENCY_RETENTION_HOURS must be at least 24");
+			}
+			if (sentFinalAfterHours < 1) {
+				problems.add("SENT_FINAL_AFTER_HOURS must be at least 1");
+			}
+			if (queueAgeAlertSeconds < 30) {
+				problems.add("QUEUE_AGE_ALERT_SECONDS must be at least 30");
 			}
 			if (retryBackoffSeconds.isEmpty() || retryBackoffSeconds.stream().anyMatch(s -> s == null || s <= 0)) {
 				problems.add("RETRY_BACKOFF_SECONDS must be a list of positive seconds");
@@ -309,21 +356,30 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 
 	/**
 	 * The real provider (ADR-0016) and the worker's protection around it: per-instance rate limit
-	 * (AC-12.6, NFR-21) and circuit breaker (AC-13.9).
+	 * (AC-12.6, NFR-21) and circuit breaker (AC-13.9). The webhook secrets verify its Svix
+	 * signatures (FR-16); two are accepted while one endpoint replaces another (docs/08 §1).
 	 */
 	public record Provider(String resendApiKey, String resendApiUrl, int workerProviderRps, int circuitBreakerFailures,
-			int circuitBreakerOpenSeconds) {
+			int circuitBreakerOpenSeconds, List<String> webhookSigningSecrets, int webhookToleranceSeconds) {
 
-		static final Provider DEFAULTS = new Provider("", "https://api.resend.com", 8, 5, 60);
+		static final Provider DEFAULTS = new Provider("", "https://api.resend.com", 8, 5, 60, List.of(), 300);
+
+		private static final Pattern WEBHOOK_SECRET = Pattern.compile("whsec_[A-Za-z0-9+/]{22,}={0,2}");
 
 		public Provider {
 			resendApiUrl = isBlank(resendApiUrl) ? "https://api.resend.com" : resendApiUrl.trim();
+			webhookSigningSecrets = trimmed(webhookSigningSecrets);
+			webhookToleranceSeconds = webhookToleranceSeconds == 0 ? 300 : webhookToleranceSeconds;
 		}
 
-		private void validate(AppEnv env, Mail mail, List<String> problems) {
+		private void validate(AppEnv env, AppRole role, Mail mail, List<String> problems) {
+			boolean servesApi = role == AppRole.API || role == AppRole.ALL;
 			if (Mail.RESEND.equals(mail.provider())) {
 				if (isBlank(resendApiKey)) {
 					problems.add("RESEND_API_KEY is required with MAIL_PROVIDER=resend");
+				}
+				if (servesApi && webhookSigningSecrets.isEmpty()) {
+					problems.add("MAIL_WEBHOOK_SIGNING_SECRET is required with MAIL_PROVIDER=resend and APP_ROLE=api|all");
 				}
 				URI uri;
 				try {
@@ -343,13 +399,21 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			if (circuitBreakerFailures < 1 || circuitBreakerOpenSeconds < 1) {
 				problems.add("CIRCUIT_BREAKER_FAILURES and CIRCUIT_BREAKER_OPEN_SECONDS must be at least 1");
 			}
+			if (webhookSigningSecrets.size() > 2
+					|| webhookSigningSecrets.stream().anyMatch(secret -> !WEBHOOK_SECRET.matcher(secret).matches())) {
+				problems.add("MAIL_WEBHOOK_SIGNING_SECRET must hold one or two comma-separated whsec_ secrets");
+			}
+			if (webhookToleranceSeconds < 1 || webhookToleranceSeconds > 3600) {
+				problems.add("WEBHOOK_TOLERANCE_SECONDS must be between 1 and 3600");
+			}
 		}
 
 		@Override
 		public String toString() {
 			return "Provider[resendApiKey=***, resendApiUrl=" + resendApiUrl + ", workerProviderRps=" + workerProviderRps
 					+ ", circuitBreakerFailures=" + circuitBreakerFailures + ", circuitBreakerOpenSeconds="
-					+ circuitBreakerOpenSeconds + "]";
+					+ circuitBreakerOpenSeconds + ", webhookSigningSecrets=" + webhookSigningSecrets.size()
+					+ " x ***, webhookToleranceSeconds=" + webhookToleranceSeconds + "]";
 		}
 
 	}

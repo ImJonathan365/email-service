@@ -65,13 +65,25 @@ tasks.test {
 	}
 }
 
+tasks.register<Test>("benchmarkOperations") {
+	description = "Measures listing (AC-20.2) and erasure (AC-29.3) with the reference dataset."
+	group = "verification"
+	testClassesDirs = sourceSets.test.get().output.classesDirs
+	classpath = sourceSets.test.get().runtimeClasspath
+	useJUnitPlatform {
+		includeTags("operations")
+	}
+	outputs.upToDateWhen { false }
+	testLogging.showStandardStreams = true
+}
+
 tasks.register<Test>("benchmarkRls") {
 	description = "Measures the latency cost of RLS on tenant queries (ADR-0008)."
 	group = "verification"
 	testClassesDirs = sourceSets.test.get().output.classesDirs
 	classpath = sourceSets.test.get().runtimeClasspath
 	useJUnitPlatform {
-		includeTags("benchmark")
+		includeTags("rls")
 	}
 	outputs.upToDateWhen { false }
 	testLogging.showStandardStreams = true

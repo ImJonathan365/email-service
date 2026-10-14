@@ -1,6 +1,68 @@
 {
   "components" : {
     "schemas" : {
+      "AdminView" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "sourceMessageId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sourceTenantId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "sourceTenantSlug" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "AnomalyOverrides" : {
+        "properties" : {
+          "bouncePauseRate" : {
+            "exclusiveMaximum" : 1.0,
+            "exclusiveMinimum" : 0.0,
+            "format" : "double",
+            "type" : "number"
+          },
+          "complaintPauseRate" : {
+            "exclusiveMaximum" : 1.0,
+            "exclusiveMinimum" : 0.0,
+            "format" : "double",
+            "type" : "number"
+          },
+          "minHourly" : {
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "volumeMultiplier" : {
+            "format" : "double",
+            "maximum" : 100.0,
+            "minimum" : 1.0,
+            "type" : "number"
+          }
+        },
+        "type" : "object"
+      },
       "Create" : {
         "properties" : {
           "allowedFromDomains" : {
@@ -164,6 +226,20 @@
         },
         "type" : "object"
       },
+      "ListResponseAdminView" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/AdminView"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "ListResponseListed" : {
         "properties" : {
           "data" : {
@@ -238,6 +314,45 @@
         },
         "type" : "object"
       },
+      "Request" : {
+        "properties" : {
+          "email" : {
+            "example" : "ana@example.com",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "reference" : {
+            "example" : "ARCO-2026-014",
+            "maxLength" : 200,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          }
+        },
+        "required" : [ "email", "reference" ],
+        "type" : "object"
+      },
+      "Result" : {
+        "properties" : {
+          "copiesRemoved" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "deleted" : {
+            "additionalProperties" : {
+              "format" : "int64",
+              "type" : "integer"
+            },
+            "type" : "object"
+          },
+          "suppressionsAnonymized" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        },
+        "type" : "object"
+      },
       "Resume" : {
         "properties" : {
           "note" : {
@@ -263,6 +378,9 @@
               "type" : "string"
             },
             "type" : "array"
+          },
+          "anomalyOverrides" : {
+            "$ref" : "#/components/schemas/AnomalyOverrides"
           },
           "createdAt" : {
             "format" : "date-time",
@@ -342,6 +460,9 @@
             "maxItems" : 50,
             "minItems" : 0,
             "type" : "array"
+          },
+          "anomalyOverrides" : {
+            "$ref" : "#/components/schemas/AnomalyOverrides"
           },
           "dailyQuota" : {
             "exclusiveMinimum" : 0,
@@ -446,6 +567,110 @@
         } ],
         "summary" : "Revoke an API key (AC-03.4)",
         "tags" : [ "Admin: API keys" ]
+      }
+    },
+    "/admin/v1/data-subjects/erase" : {
+      "post" : {
+        "operationId" : "erase",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Request"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Result"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Erase a data subject's messages, events and plain address (FR-29)",
+        "tags" : [ "Admin: data subjects" ]
+      }
+    },
+    "/admin/v1/suppressions" : {
+      "get" : {
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "reason",
+          "required" : false,
+          "schema" : {
+            "pattern" : "HARD_BOUNCE|COMPLAINT|PROVIDER",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 50,
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseAdminView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "List global suppressions with their origin (FR-18)",
+        "tags" : [ "Admin: suppressions" ]
+      }
+    },
+    "/admin/v1/suppressions/{email}" : {
+      "delete" : {
+        "operationId" : "remove",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "email",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ],
+        "summary" : "Remove a global suppression; remove it in the provider's dashboard too (ADR-0012)",
+        "tags" : [ "Admin: suppressions" ]
       }
     },
     "/admin/v1/tenants" : {

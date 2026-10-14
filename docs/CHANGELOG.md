@@ -2,6 +2,144 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-13 — Tests dependientes de la hora: deterministas
+
+- **Causa del fallo de CI** (PR #5, `AuthIpLimitTest:77`):
+  - El limitador de `401` por IP del contexto compartido conservaba sus contadores entre tests. Cada test elegía la IP al azar entre 250 y adelantaba el reloj al minuto siguiente del tiempo real, así que dos tests seguidos podían caer en la misma IP y la misma ventana.
+  - El segundo encontraba la IP ya saturada y recibía `429` en su primer intento, donde esperaba `401`.
+  - Reproducido de forma determinista fijando la misma IP en todos los tests: 5 de 6 fallan en esa línea con el mismo mensaje. Un cambio de minuto a mitad del test produce otro fallo (en la línea 97, no en la 77), así que no era la causa.
+- **Arreglo del test:** cada test construye su propio autenticador, ventanas, conjunto de prefijos y alertas sobre un reloj fijo a mitad de minuto y de hora, que avanza explícitamente. Las IPs salen de un contador y no se repiten. Ahora comprueba además el `Retry-After` exacto y la auditoría de la hora siguiente.
+- **Producción:** lo que leía la hora del sistema en decisiones de ventana pasa al `Clock`:
+  - `MessageProcessor`: ventana de 23 h y próximo intento;
+  - `ResendEmailSender`: `Retry-After` con fecha HTTP;
+  - `WebhookController`: hora de respaldo;
+  - `AcceptanceRateLimiter`: ventanas y `Retry-After`;
+  - `RateLimitAudit`: deduplicación horaria por la hora del reloj guardada en la fila.
+- **Otros tests auditados y corregidos:**
+  - `RateLimitTest`: sin `Thread.sleep` ni hora real; reloj fijo, `Retry-After` exactos y cambio de ventana provocado;
+  - `ResendWorkerTest`: reloj congelado, porque el breaker de 59 s frente a 60 s dependía de la duración del test;
+  - `ObservabilityTest`: métricas y alertas propias, sin deduplicación compartida;
+  - `WebhookTest`: ventana ±600 s (la frontera exacta está en el test unitario con reloj fijo);
+  - `ProviderRateLimiterTest`: el test de concurrencia ya no mide `System.nanoTime`, asigna huecos con el tiempo detenido;
+  - `ResendEmailSenderTest`: `Retry-After` exacto con reloj fijo.
+- **`MutableClock.fixAt`** permite fijar el reloj compartido; `reset()` lo devuelve a la hora del sistema.
+- **Fuente de la hora** (docs/05): una decisión usa una sola fuente en sus dos extremos.
+  - Los puntos donde se encuentran el `Clock` y `now()` de PostgreSQL están analizados frente a un desfase de segundos. La ventana de 23 h sigue por debajo de las 24 h de idempotencia de Resend con ~59 min de margen.
+  - El tiempo aceptación → `SENT` (NFR-19) se calcula ahora en SQL (`sent_at - created_at`), porque mezclar fuentes sesgaba un objetivo de 5 s.
+- **Webhooks:** `SvixWebhookVerifierTest` comprueba la frontera exacta en los dos sentidos (300 s aceptado, 301 s rechazado, en pasado y en futuro). El caso aceptado en futuro faltaba.
+
+## 2026-10-12 — H7, parte 3: mantenimiento y observabilidad (H7 completo)
+
+- **Hecho:**
+  - **Purgas (FR-23)** en lotes idempotentes con advisory lock, como tareas del worker:
+    - variables a los 7 días de un estado terminal o final por tiempo;
+    - idempotencia a las 24 h;
+    - mensajes y eventos según la retención del tenant; los tags se van en cascada;
+    - `rendered_*` y huérfanos a los 30 días, contadores a los 2 días;
+    - `audit_log` a los 365 días mediante una función `SECURITY DEFINER` (V5);
+    - nunca `QUEUED`/`SENDING` ni supresiones.
+  - **Borrado por titular (FR-29):**
+    - en todos los tenants y en una transacción: mensajes, eventos y tags en cascada, `cc`/`bcc` limpiados, supresiones con solo el hash;
+    - auditado con hash y referencia; idempotente;
+    - 2,2 s con el dataset de referencia (AC-29.3, límite 60 s).
+  - **Health:** indicadores `queue` (`DEGRADED` con HTTP 200) y `provider` (últimos 5 min, sin *ping*).
+  - **Métricas de AC-24.2** que faltaban: estados, cola, retenidos, latencias de aceptación y del proveedor, intentos, tasas de rebote y queja por tenant, filas purgadas.
+  - **Alertas de NFR-11** como líneas `ERROR` con el campo `alert`, más `ops/prometheus/alerts.yml` de referencia. Los valores y qué hacer con cada uno están en el README.
+  - **Logs** con `tenantSlug` y `messageId` en el worker y los webhooks. Un test verifica que un envío completo no deja direcciones ni variables en los logs.
+  - **Configuración nueva:** `VARIABLES_RETENTION_DAYS`, `IDEMPOTENCY_RETENTION_HOURS`, `SENT_FINAL_AFTER_HOURS` y `QUEUE_AGE_ALERT_SECONDS`, validadas.
+  - **Test de valores por defecto:** fuera del perfil de test, el límite de `401` por IP es 30 (petición del owner).
+  - **Reloj hacia atrás:** el conjunto de prefijos y la deduplicación de alertas lo toleran.
+- **Propuestas pendientes de confirmar por el owner:**
+  - `DELIVERED` cuenta como final por tiempo igual que `SENT` (AC-23.9);
+  - `FAILED_RATE` exige al menos 20 mensajes en la hora;
+  - alertas añadidas: `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`.
+
+## 2026-10-12 — H7, parte 2: protección
+
+- **Hecho:**
+  - **Rate limit y cuota por tenant** (FR-21):
+    - contador en PostgreSQL en la transacción del `INSERT`; minuto UTC y día del calendario del tenant;
+    - `429 RATE_LIMITED` con `Retry-After`; sin consumo en rechazos ni repeticiones idempotentes; un `FAILED/SUPPRESSED` sí consume;
+    - límites aplicados sin redesplegar;
+    - auditoría agregada por tenant, ventana y hora.
+  - **`401` repetidos por IP** (docs/08 §4, esquema del owner):
+    - prefijos de keys activas en memoria, refrescados cada 60 s y al emitir o revocar;
+    - por encima de `AUTH_FAILURES_PER_MINUTE_PER_IP` (30), `429` sin consulta a la BD solo para keys ausentes, mal formadas o de prefijo desconocido;
+    - un prefijo conocido sigue la verificación completa, así que la revocación es inmediata;
+    - auditoría `AUTHENTICATION_FAILURES_BY_IP` por IP y hora; métrica `email_auth_key_lookups_total` para verificar que no hubo consulta.
+  - **Anomalías y pausa automática** (FR-34):
+    - tarea `detectAnomalies` cada 5 min (volumen contra el p95 horario de 14 días, rebotes, quejas), con los mínimos de volumen como suelo;
+    - `anomalyOverrides` por tenant en el `PATCH` de administración;
+    - pausa auditada, con métrica y alerta.
+  - **Alertas estructuradas** (`alert`, `alertSubject`) deduplicadas 15 min. La pausa por dominio no verificado de H5 usa la misma alerta `TENANT_PAUSED`.
+  - **Tareas periódicas del worker** (`PeriodicTasks`), base de las purgas de la parte 3.
+  - **Test del trigger de tags** con un `INSERT` multifila y varias sentencias en una transacción, más el borrado en cascada (pedido por el owner para H8).
+- **Pendiente (parte 3):** purgas, borrado por titular, indicadores `queue`/`provider`, métricas y alertas restantes y documentación de las alertas en el README.
+
+## 2026-10-12 — H7, parte 1: consultas
+
+- **Hecho:**
+  - **`GET /v1/emails/{id}`** (FR-19):
+    - estado, plantilla y versión, `locale`, destinatarios, intentos, `providerMessageId`, marcas de tiempo, `lastError` y el historial de eventos;
+    - `404` para otro tenant.
+  - **Contenido renderizado:** con `storeRenderedContent`, el worker guarda una segunda renderización con las variables `x-sensitive` como `[REDACTED]` (AC-19.3).
+  - **`GET /v1/emails`** (FR-20): filtros `status`, `templateKey`, `to`, `tag`, `createdAfter` y `createdBefore`, con cursor opaco.
+  - **AC-20.2 medido:** `./gradlew benchmarkOperations`, con el dataset de referencia definido por el owner (4 M mensajes, 2,8 M en un tenant y 400 k en cada uno de los otros tres), a través de la API.
+    - p95 entre 6 y 13 ms en los 14 casos, incluidos un tag inexistente y una dirección sin mensajes.
+    - Hallazgo: con RLS, PostgreSQL solo usa un índice para condiciones *leakproof*. `lower()` y `@>` no lo son, y el filtro `to` hacía un recorrido secuencial (p95 990 ms).
+    - V4 lo resuelve con la columna generada `to_email_lower`, la tabla `email_message_tag` (llenada por trigger y con RLS `FORCE`) e índices con desempate por `id`.
+  - **Tests nuevos:**
+    - un test de catálogo exige RLS `FORCE` en toda tabla con `tenant_id`;
+    - el test del rol `migrate` cuenta los archivos de migración en lugar de un número fijo.
+  - **Errores de parámetros:** un parámetro de query mal formado responde `422`. Un segmento de ruta mal formado sigue respondiendo `404`.
+  - **`WebhookDatabaseFailureTest`** queda `@Isolated`.
+  - **docs/02 AC-20.2:** corregida la definición del dataset.
+
+## 2026-10-11 — Tests: un solo contexto de Spring compartido
+
+- **Hecho:**
+  - **Contextos de Spring Test:** de 7 a 4 creados; al final de la suite solo queda abierto 1 (log de caché de Spring Test).
+    - `WorkerTest`, `ResendWorkerTest` y `WebhookDatabaseFailureTest` usan ahora el contexto común. Los dobles de test compartidos (`SharedTestBeans`: proveedor espía y reloj controlable) se programan y se restauran; ya no se declaran beans por clase.
+    - El `503` se prueba con errores reales de BD (privilegio revocado, tabla renombrada), sin `@MockitoSpyBean`.
+    - Siguen aparte, con `@DirtiesContext`, los que cambian configuración global: `SendingPolicyConfigTest` y los arranques con `APP_ROLE=worker` y `APP_ENV=production`.
+  - **Pools en test:** 5 de tenant y 3 de sistema. Producción sigue con 10 y 4.
+  - **Conexiones:** el contenedor de test vuelve a las 100 por defecto.
+- **Mediciones:** la suite tarda lo mismo (46 s antes; 42–47 s después). Lo que baja son las conexiones abiertas a la vez.
+
+## 2026-10-11 — H6: eventos y supresiones
+
+- **Hecho:**
+  - **`POST /webhooks/{provider}`** (FR-16):
+    - `WebhookVerifier` en `provider`, con `SvixWebhookVerifier` propio: cuerpo crudo, tiempo constante, uno o dos secretos, ventana ±5 min, verificado con el ejemplo publicado por Svix;
+    - respuestas `204`, `401`, `400`, `404`, `413` y `503` solo ante un error de BD;
+    - dedupe por `svix-id`;
+    - los rechazos se cuentan y se registran como mucho una vez por IP y minuto.
+  - **Eventos** (FR-17):
+    - mapeo completo de docs/02 §2.1 y estados por precedencia, incluidos `DELIVERED → BOUNCED/COMPLAINED`, `email.failed` y `email.suppressed`;
+    - payload minimizado por lista blanca;
+    - huérfanos guardados con `204`.
+  - **Supresiones** (FR-10, ADR-0012):
+    - globales desde rebotes, quejas y `email.suppressed`, en la transacción del evento e independientes del estado;
+    - espejo de `suppression.added/removed`.
+  - **API de supresiones** (FR-18) y `GET/DELETE /admin/v1/suppressions`, con cursor opaco.
+  - **ArchUnit:** sin ciclos entre módulos de primer nivel; `events` no depende de `sending`; `sending` y `events` solo usan los puertos de `provider`.
+  - **README:** registro del endpoint en Resend, rotación del secreto y prueba temporal con un túnel que solo expone `/webhooks/*`.
+- **Decisiones del owner (2026-10-11):**
+  - **Eventos que llegan con el mensaje en `QUEUED`/`SENDING`:** se guardan sin tocar el estado y el worker los aplica tras su cierre a `SENT`.
+  - **Mensaje que nosotros cerramos en `FAILED` y el proveedor sí procesó:** sigue `FAILED`, con WARN y `email_event_after_failure_total`.
+  - **Rebote o queja con `cc`/`bcc`:** no se suprime el `to`; se aplica el estado y la supresión llega por `suppression.added`.
+  - **Correlación:** primero la etiqueta `message_id`, después `data.email_id`; si apuntan a mensajes distintos, el evento queda huérfano.
+  - **`POST` repetido → `200`; `DELETE` inexistente → `404`.**
+  - **`EmailAddresses` y `SuppressionHashes` pasan a `events`.**
+- **Otros cambios:**
+  - el gestor de transacciones de tenant pasa de `common` a `tenancy`, para romper un ciclo que ya existía;
+  - el contenedor de test admite 300 conexiones;
+  - `.gitignore` ignora `.env.*` (salvo `.env.example`).
+- **Pendiente:**
+  - purga de huérfanos a los 30 días (tarea de mantenimiento);
+  - historial de eventos en `GET /v1/emails/{id}` (H7);
+  - registrar el endpoint real cuando exista la cuenta de staging (owner).
+
 ## 2026-10-10 — H5: proveedor real (Resend)
 
 - **Hecho:**

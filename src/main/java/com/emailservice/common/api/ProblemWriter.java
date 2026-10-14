@@ -36,6 +36,9 @@ public class ProblemWriter {
 	public void write(HttpServletRequest request, HttpServletResponse response, ApiException exception)
 			throws IOException {
 		response.setStatus(exception.code().status());
+		if (exception.retryAfterSeconds() != null) {
+			response.setHeader("Retry-After", String.valueOf(exception.retryAfterSeconds()));
+		}
 		response.setContentType(Problem.MEDIA_TYPE);
 		response.setCharacterEncoding("UTF-8");
 		jsonMapper.writeValue(response.getOutputStream(),

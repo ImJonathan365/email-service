@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** AC-23.5: x-sensitive variables are removed, at any depth, and nothing else. */
+/** AC-23.5 and AC-19.3: x-sensitive variables are removed or redacted, at any depth, and nothing else. */
 class SensitiveVariablesTest {
 
 	static final JsonMapper JSON = JsonMapper.builder().build();
@@ -34,6 +34,25 @@ class SensitiveVariablesTest {
 		assertThat(stripped.toString()).isEqualTo("""
 				{"firstName":"Ana","extra":"kept","order":{"total":10},"codes":[],"lines":[{"sku":"S1"},{"sku":"S2"}]}""");
 		assertThat(variables.get("resetUrl")).as("input not modified").isNotNull();
+	}
+
+	@Test
+	void ac_19_3_redactionReplacesSensitiveValuesAtAnyDepthForTheStoredCopy() {
+		VariablesSchema schema = VariablesSchema.parse(JSON.readTree("""
+				{"properties": {"firstName": {"type": "string"},
+				 "resetUrl": {"type": "string", "format": "uri", "x-sensitive": true},
+				 "order": {"type": "object", "properties": {"code": {"type": "string", "x-sensitive": true}}},
+				 "codes": {"type": "array", "items": {"type": "string", "x-sensitive": true}}}}
+				"""), "variablesSchema");
+		JsonNode variables = JSON.readTree("""
+				{"firstName": "Ana", "resetUrl": "https://x.test/r?t=1", "order": {"code": "123456"}, "codes": ["a", "b"]}
+				""");
+
+		JsonNode redacted = SensitiveVariables.redact(schema, variables);
+
+		assertThat(redacted.toString()).isEqualTo("""
+				{"firstName":"Ana","resetUrl":"[REDACTED]","order":{"code":"[REDACTED]"},"codes":["[REDACTED]","[REDACTED]"]}""");
+		assertThat(variables.get("resetUrl").stringValue()).as("input not modified").isEqualTo("https://x.test/r?t=1");
 	}
 
 }

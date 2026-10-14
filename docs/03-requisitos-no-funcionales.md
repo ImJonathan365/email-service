@@ -134,6 +134,10 @@ Regla explícita para frenar la sobreingeniería:
 - Métricas Micrometer (ver FR-24) accesibles por Actuator; exportación a Prometheus por configuración.
 - Trazas distribuidas: fuera del MVP (basta con `requestId`); **(rev. 2026-10)** el exportador OTLP se puede activar por configuración sin cambios de código.
 - **(rev. 2026-10)** Alertas mínimas: antigüedad de cola > 300 s; tasa de `FAILED` > 5 % en 1 h; tenant pausado (FR-34); circuit breaker abierto > 10 min; `email_lost_lock_total` > 0; `PROVIDER_IDEMPOTENCY_CONFLICT` > 0; tasa de queja por tenant > 0,1 % en 7 días.
+- **(rev. 2026-10-12)** Implementadas en H7. El canal lo decidió el owner; el resto son propuestas pendientes de su confirmación:
+  - **Canal:** líneas de log `ERROR` con el campo `alert`, deduplicadas 15 min. Los valores están en el README; `ops/prometheus/alerts.yml` tiene las reglas de referencia.
+  - **Alertas añadidas:** `PROVIDER_CONFIGURATION` (H5) y `AUTH_FAILURE_SPIKE` (docs/08 §9).
+  - **`FAILED_RATE`:** exige al menos 20 mensajes con resultado en la hora, para no alertar con dos envíos.
 
 ### NFR-12 — Mantenibilidad (Must)
 

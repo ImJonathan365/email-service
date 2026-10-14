@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -19,6 +20,8 @@ import com.emailservice.support.TestHttp;
 import com.emailservice.templates.engine.TemplateEngine;
 
 /** docs/05 §1: a worker instance serves no API, only Actuator for the orchestrator. */
+// A one-off configuration: closed after this class so its pools do not stay open for the rest of the suite.
+@DirtiesContext
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = { "app.env=local", "app.role=worker" })
 class WorkerRoleStartupTests {
 

@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -46,8 +47,11 @@ public class ResendEmailSender implements EmailSender {
 
 	private final JsonMapper jsonMapper;
 
+	private final Clock clock;
+
 	public ResendEmailSender(String baseUrl, String apiKey, Duration connectTimeout, Duration readTimeout,
-			JsonMapper jsonMapper) {
+			JsonMapper jsonMapper, Clock clock) {
+		this.clock = clock;
 		this.client = HttpClient.newBuilder()
 			.version(HttpClient.Version.HTTP_1_1)
 			.connectTimeout(connectTimeout)
@@ -94,7 +98,7 @@ public class ResendEmailSender implements EmailSender {
 			Thread.currentThread().interrupt();
 			throw SendException.transientFailure("PROVIDER_UNAVAILABLE", "Interrupted while calling Resend.", ex);
 		}
-		return classify(response);
+		return classify(response, clock);
 	}
 
 	/** Fixed field order: the same message always produces the same body (AC-12.7). */
@@ -125,7 +129,7 @@ public class ResendEmailSender implements EmailSender {
 		return body;
 	}
 
-	private SendResult classify(HttpResponse<String> response) throws SendException {
+	private SendResult classify(HttpResponse<String> response, Clock clock) throws SendException {
 		int status = response.statusCode();
 		if (status >= 200 && status < 300) {
 			JsonNode id = parse(response.body()).get("id");
@@ -151,7 +155,7 @@ public class ResendEmailSender implements EmailSender {
 							null)
 					: new SendException(SendException.Kind.TRANSIENT, "PROVIDER_UNAVAILABLE", detail, null, error, null);
 			case 429 -> new SendException(SendException.Kind.TRANSIENT, "PROVIDER_RATE_LIMITED", detail,
-					retryAfter(response), error, null);
+					retryAfter(response, clock), error, null);
 			default -> status >= 500
 					? new SendException(SendException.Kind.TRANSIENT, "PROVIDER_UNAVAILABLE", detail, null, error, null)
 					: new SendException(SendException.Kind.PERMANENT, "PROVIDER_REJECTED", detail, null, error, null);
@@ -178,7 +182,7 @@ public class ResendEmailSender implements EmailSender {
 	}
 
 	/** Retry-After as delta seconds or an HTTP date (RFC 9110). */
-	static Duration retryAfter(HttpResponse<?> response) {
+	static Duration retryAfter(HttpResponse<?> response, Clock clock) {
 		String value = response.headers().firstValue("Retry-After").orElse(null);
 		if (value == null) {
 			return null;
@@ -188,7 +192,7 @@ public class ResendEmailSender implements EmailSender {
 		}
 		catch (NumberFormatException notSeconds) {
 			try {
-				Duration until = Duration.between(ZonedDateTime.now(),
+				Duration until = Duration.between(ZonedDateTime.now(clock),
 						ZonedDateTime.parse(value.trim(), DateTimeFormatter.RFC_1123_DATE_TIME));
 				return until.isNegative() ? Duration.ZERO : until;
 			}

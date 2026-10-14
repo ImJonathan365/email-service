@@ -31,6 +31,9 @@ final class CircuitBreaker {
 
 	private boolean probeInFlight;
 
+	/** When it last left CLOSED; kept while it reopens after failed probes (NFR-11 alert). */
+	private Instant openSince;
+
 	CircuitBreaker(int failureThreshold, Duration openFor, Clock clock) {
 		this.failureThreshold = failureThreshold;
 		this.openFor = openFor;
@@ -60,6 +63,7 @@ final class CircuitBreaker {
 		state = State.CLOSED;
 		consecutiveFailures = 0;
 		probeInFlight = false;
+		openSince = null;
 	}
 
 	synchronized void onTransientFailure() {
@@ -88,7 +92,15 @@ final class CircuitBreaker {
 		return state;
 	}
 
+	/** How long it has not been closed; zero while closed. */
+	synchronized Duration openFor() {
+		return openSince == null ? Duration.ZERO : Duration.between(openSince, clock.instant());
+	}
+
 	private void open() {
+		if (openSince == null) {
+			openSince = clock.instant();
+		}
 		state = State.OPEN;
 		openUntil = clock.instant().plus(openFor);
 		probeInFlight = false;

@@ -2,8 +2,12 @@ package com.emailservice;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.util.stream.Stream;
 
 import javax.sql.DataSource;
 
@@ -35,7 +39,13 @@ class MigrateRoleTests {
 				ResultSet rs = owner.createStatement()
 					.executeQuery("SELECT count(*) FROM flyway_schema_history WHERE success")) {
 			rs.next();
-			assertThat(rs.getInt(1)).isEqualTo(3);
+			assertThat(rs.getInt(1)).as("every file in db/migration applied").isEqualTo(migrationFiles());
+		}
+	}
+
+	private static long migrationFiles() throws IOException {
+		try (Stream<Path> files = Files.list(Path.of("src/main/resources/db/migration"))) {
+			return files.filter(file -> file.getFileName().toString().matches("V\\d+__.*\\.sql")).count();
 		}
 	}
 

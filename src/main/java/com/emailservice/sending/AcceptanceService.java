@@ -23,6 +23,8 @@ import com.emailservice.common.api.ApiException;
 import com.emailservice.common.api.ErrorCode;
 import com.emailservice.common.api.Problem.FieldError;
 import com.emailservice.common.config.AppProperties;
+import com.emailservice.events.EmailAddresses;
+import com.emailservice.events.SuppressionHashes;
 import com.emailservice.templates.TemplateResolver;
 import com.emailservice.templates.engine.TemplateEngine;
 import com.emailservice.templates.schema.UrlPolicy;

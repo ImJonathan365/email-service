@@ -26,6 +26,7 @@ import com.emailservice.support.TenantFixture;
  * Not part of the test suite: ./gradlew benchmarkRls
  */
 @Tag("benchmark")
+@Tag("rls")
 class RlsCostBenchmark {
 
 	static final int TENANTS = 20;

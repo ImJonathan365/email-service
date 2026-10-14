@@ -199,6 +199,15 @@ Content-Type: application/json
 
 Incluye `renderedSubject` / `renderedHtml` solo si el tenant tiene `storeRenderedContent = true` y no se han purgado (variables `x-sensitive` como `[REDACTED]`). Un `id` de otro tenant → `404 MESSAGE_NOT_FOUND`.
 
+**(rev. 2026-10-12) Implementado en H7:**
+- **Campos que se añaden al ejemplo:**
+  - `locale` (efectivo), `cc`, `bcc` y `firstClickedAt`;
+  - `lastError`: el código del último intento, visible también mientras el mensaje sigue reintentando; `failureCode` solo existe en `FAILED`;
+  - `renderedText`, con las mismas condiciones que `renderedSubject` y `renderedHtml`.
+- **Contenido renderizado:** el worker lo guarda solo con `storeRenderedContent = true`. Hace una segunda renderización con las variables `x-sensitive` sustituidas por `[REDACTED]`, así que la copia guardada nunca contiene valores sensibles. Lo enviado sí los llevaba. Si el tenant desactiva el flag, deja de mostrarse.
+- **`events`:** el historial de webhooks del mensaje, en orden (`type`, `occurredAt`).
+- **Scope:** requiere `emails:read`; sin él, `403`. Un `id` mal formado → `404`.
+
 ## 6. `GET /v1/emails` — listado
 
 `?status=FAILED&templateKey=password-reset&to=ana@example.com&tag=password-reset&createdAfter=2026-09-01T00:00:00Z&createdBefore=2026-10-01T00:00:00Z&limit=20&cursor=…`
@@ -209,6 +218,16 @@ Incluye `renderedSubject` / `renderedHtml` solo si el tenant tiene `storeRendere
   "nextCursor": "eyJjcmVhdGVkQXQiOiIyMDI2…"
 }
 ```
+
+**(rev. 2026-10-12)** Reglas del listado:
+- **Orden y tamaño:** del más reciente al más antiguo; `limit` de 1 a 100 (20 por defecto).
+- **Filtros:**
+  - `to` no distingue mayúsculas;
+  - `tag` es un único tag;
+  - `createdAfter` es inclusivo y `createdBefore` exclusivo, ambos en ISO-8601;
+  - un `templateKey` inexistente devuelve una lista vacía.
+- **Cursor:** `cursor` es el `nextCursor` anterior. Las páginas no se repiten ni dejan huecos aunque lleguen mensajes nuevos entre una petición y otra.
+- **Errores:** un parámetro mal formado (`status` desconocido, fecha inválida, cursor ajeno) → `422 VALIDATION_ERROR`.
 
 ## 7. Plantillas
 
@@ -297,8 +316,17 @@ DELETE /v1/suppressions/bad@example.com
 ```
 
 - `GET` devuelve `{ email | emailMasked, scope: TENANT|GLOBAL, reason, createdAt }`; las globales van enmascaradas.
+  - **(rev. 2026-10-11)** Las propias incluyen también `note`. Las globales no muestran ni la nota ni el tenant de origen.
+  - `limit` va de 1 a 100 (por defecto 50) y `reason` es opcional. `cursor` es el `nextCursor` de la página anterior; un cursor que no emitió este servicio → `422`.
 - `POST` crea siempre `reason = MANUAL`, `scope = TENANT`.
+  - **(rev. 2026-10-11)** Responde `201` con la supresión creada, o `200` con la existente si el tenant ya tenía esa dirección suprimida: es idempotente y no cambia la nota.
+  - Una dirección inválida → `422 VALIDATION_ERROR`.
 - `DELETE` solo borra las `MANUAL` propias; sobre una global → `403 ADMIN_REQUIRED`.
+  - **(rev. 2026-10-11)** `204` si se borró (queda en auditoría como `SUPPRESSION_DELETED`, sin la dirección).
+  - `404 RESOURCE_NOT_FOUND` si el tenant no tiene esa supresión y tampoco existe una global.
+- **(rev. 2026-10-11)** Administración de las globales:
+  - `GET /admin/v1/suppressions?reason&limit&cursor` las lista con la dirección completa y el origen (`sourceTenantSlug`, `sourceMessageId`);
+  - `DELETE /admin/v1/suppressions/{email}` borra la global (`204`, auditado; `404` si no existe). Hay que retirarla también en el panel del proveedor; si no, el proveedor la sigue saltando y la vuelve a informar.
 
 ## 9. Webhooks entrantes (rev. 2026-10)
 
@@ -312,6 +340,10 @@ svix-signature: v1,k8s9…
 
 - La firma se verifica sobre el **cuerpo crudo**, antes de parsear el JSON, con el secreto del endpoint (`MAIL_WEBHOOK_SIGNING_SECRET`), con una ventana de ±5 min sobre `svix-timestamp`. `svix-id` se guarda como `provider_event_id` para deduplicar.
 - Respuestas: `204` (procesado, duplicado o huérfano), `401` (firma inválida o fuera de ventana), `400` (cuerpo ilegible tras verificar la firma), `503` (BD no disponible; el proveedor reintentará). **Nunca 5xx** por un evento que no se puede correlacionar.
+- **(rev. 2026-10-11)** Otros detalles:
+  - un proveedor desconocido, o Resend sin `MAIL_WEBHOOK_SIGNING_SECRET` configurado (desarrollo local), → `404`;
+  - un cuerpo de más de 256 KB → `413`;
+  - el `401` no dice qué falló; el motivo va solo a la métrica `email_webhook_rejected_total{reason}` y a un WARN por IP y minuto.
 - El formato exacto depende del proveedor: el puerto `WebhookVerifier` (módulo `provider`) tiene una implementación por proveedor; el módulo `events` la consume.
 - Mapeo de eventos: `02` §2.1.
 
@@ -362,13 +394,27 @@ svix-signature: v1,k8s9…
 
 **(rev. 2026-10-06) Comportamiento implementado en H2:**
 - `PATCH /admin/v1/tenants/{slug}` es una actualización parcial: un campo ausente o `null` conserva su valor (por eso `replyTo` no se puede vaciar con un `PATCH`). Las listas (`allowedFromDomains`, `allowedLinkHosts`) se sustituyen completas y se normalizan a minúsculas. `status` admite `ACTIVE` o `SUSPENDED`.
+- **(rev. 2026-10-12)** `anomalyOverrides` cambia los umbrales de FR-34 de ese tenant (AC-34.5): `{ "volumeMultiplier": 4, "minHourly": 200, "bouncePauseRate": 0.05, "complaintPauseRate": 0.002 }`.
+  - Un campo ausente usa el valor del servicio.
+  - `minHourly` solo sube el mínimo: uno menor que `ANOMALY_MIN_HOURLY` no tiene efecto.
+  - Rangos: `volumeMultiplier` de 1 a 100; las tasas, estrictamente entre 0 y 1.
+  - El objeto enviado sustituye al anterior y aparece en la respuesta.
 - `GET /admin/v1/tenants` y `GET /admin/v1/tenants/{slug}/api-keys` responden `{"data": [...], "nextCursor": null}`.
 - Todo acceso a `/admin/v1/**` queda en auditoría: las modificaciones con su acción (`TENANT_CREATED`, `TENANT_UPDATED` con los nombres de los campos cambiados, `TENANT_SUSPENDED`, `TENANT_REACTIVATED`, `API_KEY_ISSUED`, `API_KEY_REVOKED`), las lecturas como `ADMIN_ACCESS` y los rechazos como `ADMIN_ACCESS_DENIED`.
 - Una ruta que existe con otro método responde `405 METHOD_NOT_ALLOWED` con la cabecera `Allow`; un cuerpo que no es JSON, `415 UNSUPPORTED_MEDIA_TYPE` (añadidos al catálogo el 2026-10-06; compatibles según NFR-17).
 
 **Levantar pausa** — `POST /admin/v1/tenants/colmena/resume-sending` `{ "note": "pico legítimo: aviso de mantenimiento" }` → `200`.
 
-**Borrado por titular** — `POST /admin/v1/data-subjects/erase` `{ "email": "ana@example.com", "reference": "ARCO-2026-014" }` → `200 { "deleted": { "email_message": 12, "email_event": 31, "email_attachment": 0 }, "suppressionsAnonymized": 1 }`.
+**Borrado por titular** — `POST /admin/v1/data-subjects/erase` `{ "email": "ana@example.com", "reference": "ARCO-2026-014" }` → `200 { "deleted": { "email_message": 12, "email_event": 31, "email_message_tag": 9 }, "copiesRemoved": 2, "suppressionsAnonymized": 1 }`.
+
+**(rev. 2026-10-12)** Detalles del borrado por titular:
+- **Contenido de la respuesta:**
+  - sin `email_attachment`, porque esa tabla no existe (ADR-0015);
+  - `email_message_tag` cuenta las filas que se fueron en cascada con los mensajes;
+  - `copiesRemoved` cuenta los mensajes de los que se quitó la dirección en `cc`/`bcc`.
+- **Comparaciones:** no distinguen mayúsculas.
+- **Idempotencia:** una segunda ejecución devuelve ceros.
+- **Validación:** `reference` es obligatoria (≤ 200 caracteres, sin saltos de línea).
 
 ## 11. Formato de error
 
@@ -415,7 +461,7 @@ svix-signature: v1,k8s9…
 | 422 | `ATTACHMENT_INVALID` | **Reservado** (FR-30 Won't); no se emite en el MVP |
 | 422 | `SEND_AT_OUT_OF_RANGE` | **(rev. 2026-10)** `sendAt` en el pasado o a más de 30 días |
 | 422 | `RECIPIENT_SUPPRESSED` | Solo en modo `reject` |
-| 429 | `RATE_LIMITED` | Límite por minuto o cuota diaria (incluye `Retry-After`) |
+| 429 | `RATE_LIMITED` | Límite por minuto o cuota diaria (incluye `Retry-After`). **(rev. 2026-10-12)** También una IP con demasiados `401`, solo en peticiones sin prefijo de key conocido (`08` §4) |
 | 500 | `INTERNAL_ERROR` | Fallo no esperado (sin detalles internos) |
 | 503 | `SERVICE_UNAVAILABLE` | Base de datos no disponible |
 

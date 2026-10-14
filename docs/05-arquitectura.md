@@ -80,6 +80,11 @@ Reglas de dependencia (verificables con ArchUnit):
 - `templates` no conoce `sending`; recibe texto y variables, devuelve texto renderizado.
 - Toda consulta de tenant pasa por un repositorio que exige `tenantId` y usa `tenantDataSource` (rol `email_app`, RLS).
 - **(rev. 2026-10)** `systemDataSource` (rol `email_system`) solo se inyecta en `sending.worker`, `events`, `tenancy.auth`, `tenancy.admin`, `abuse` y `maintenance`.
+- **(rev. 2026-10-11, owner)** Reglas añadidas en H6:
+  - no hay ciclos entre los módulos de primer nivel (ArchUnit);
+  - `sending` depende de `events` (supresiones, eventos guardados) y `events` nunca de `sending`: si `events` actualiza `email_message`, lo hace con su propio repositorio sobre el DataSource de sistema;
+  - `EmailAddresses` (normalización y validación) y `SuppressionHashes` viven en `events`, el dueño de las supresiones;
+  - el gestor de transacciones de tenant está en `tenancy` (antes en `common`, que formaba un ciclo).
 
 ## 3. Flujo de envío (camino feliz) (rev. 2026-10)
 
@@ -157,6 +162,88 @@ Reglas de dependencia (verificables con ArchUnit):
 
 Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_ATTEMPTS` = 6 (5 esperas + 1). Ventana total < 23 h, validada al arrancar (AC-13.7). Un `429` con `Retry-After` respeta ese valor.
 
+**(rev. 2026-10-11) Comportamiento implementado en H6 (eventos):**
+- **Webhook:**
+  - `SvixWebhookVerifier` (propio, sin SDK) detrás de `WebhookVerifier`: HMAC-SHA256 sobre `svix-id.svix-timestamp.<cuerpo crudo>`, comparación en tiempo constante, uno o dos secretos `whsec_`, ventana ±`WEBHOOK_TOLERANCE_SECONDS`;
+  - se verifica con el ejemplo publicado por Svix;
+  - el endpoint solo existe con `APP_ROLE=api|all`.
+- **Una transacción por evento** (rol `email_system`):
+  - `INSERT … ON CONFLICT (provider, provider_event_id) DO NOTHING`: un duplicado no tiene efectos;
+  - después, el cambio de estado por precedencia (cada `UPDATE` enumera los estados de los que puede salir) y las supresiones, independientes entre sí.
+- **Eventos tempranos y fallo con evento posterior:** ver `02` §2.
+- **Supresiones desde eventos:** `bounced` → `HARD_BOUNCE`, `complained` → `COMPLAINT`, `suppressed` y `suppression.added` → `PROVIDER`, todas globales; `suppression.removed` solo retira `PROVIDER`. Regla de `cc`/`bcc`: AC-10.3.
+- **Payload minimizado por lista blanca:**
+  - se guardan: `type`, `created_at`, `data.email_id`, `data.created_at`, `tags.message_id`, `bounce.type/subType`, `suppressed.type`, los timestamps de click y open, `click.link` sin query ni fragmento, y en `suppression.*` los campos `id`, `origin` y `source_id`;
+  - nunca se guardan direcciones, asunto, cabeceras, IP ni user agent.
+- **Métricas:**
+  - `email_webhook_events_total{type,outcome}` (`outcome` = `processed`, `duplicate` u `orphan`);
+  - `email_webhook_rejected_total{reason}`;
+  - `email_webhook_correlation_conflict_total`;
+  - `email_complaints_total{tenant}` (alerta) y `email_delivery_delayed_total{tenant}`;
+  - `email_event_after_failure_total`;
+  - `email_suppressions_created_total{reason}`.
+- **Fuera de H6:** la purga de huérfanos a los 30 días (AC-16.5, tarea `purgeExpiredData`) y el historial de eventos en `GET /v1/emails/{id}` (H7).
+
+**(rev. 2026-10-12) Comportamiento implementado en H7, parte 2:**
+- **Rate limit y cuota** (FR-21):
+  - el contador `rate_limit_counter` se incrementa en la transacción del `INSERT`, después de las validaciones;
+  - la ventana `MINUTE` es UTC y la `DAY` sigue el calendario del tenant (`timezone`). **(rev. 2026-10-13)** Ambas se calculan con el `Clock` de la aplicación (ver "Fuente de la hora");
+  - al superarse, `429 RATE_LIMITED` con `Retry-After` hasta el fin de la ventana; el rollback deshace el incremento, así que el rechazo no consume cuota;
+  - los límites se leen en cada petición, así que un `PATCH` aplica sin redesplegar;
+  - auditoría agregada: una fila `TENANT_RATE_LIMITED` por tenant, ventana y hora (owner), en su propia transacción;
+  - métrica `email_rate_limited_total{tenant,window}`.
+- **`detectAnomalies`** (FR-34), tarea del worker cada 5 min bajo advisory lock, sobre `created_at`:
+  - **volumen:** aceptados en los últimos 60 min contra `max(multiplicador × p95 horario de los 14 días anteriores, mínimo horario)`, contando como cero las horas sin mensajes;
+  - **rebotes:** `BOUNCED / (SENT + DELIVERED + BOUNCED + COMPLAINED)` de 24 h, con ≥ 200 de esos resultados;
+  - **quejas:** `COMPLAINED / (DELIVERED + COMPLAINED)` de 7 días con ≥ 1 000 entregados, o 3 quejas en 24 h;
+  - orden de prioridad: quejas, rebotes, volumen;
+  - al pausar: auditoría `TENANT_PAUSED` (SYSTEM, con lo observado y el umbral), métrica `email_tenant_paused_total{reason}` y alerta `TENANT_PAUSED`.
+- **Tareas periódicas del worker:** `PeriodicTasks` las ejecuta en hilos virtuales, cada una con su intervalo. El barrido de locks sigue en el bucle de la cola.
+- **Alertas:** líneas de log ERROR con los campos `alert` y `alertSubject`, deduplicadas 15 min por instancia (owner). La lista completa de alertas llega con la parte 3.
+
+**(rev. 2026-10-12) Comportamiento implementado en H7, parte 3:**
+- **Health:**
+  - indicador `queue` (todos los roles): `DEGRADED` con HTTP 200 por encima de `QUEUE_AGE_ALERT_SECONDS`; no cuenta los tenants retenidos;
+  - indicador `provider` (worker): resultados de los últimos 5 min sin *ping*. `DOWN` con el breaker abierto o tras un error de configuración; `DEGRADED` si al menos la mitad de 5 o más llamadas fallaron de forma transitoria;
+  - ninguno de los dos forma parte de las sondas;
+  - se muestran los componentes, no sus detalles.
+- **Métricas nuevas (AC-24.2):**
+  - `email_messages{status}` (últimas 24 h);
+  - `email_queue_depth`, `email_queue_oldest_seconds` y `email_queue_held{tenant}`;
+  - `email_acceptance_seconds` y `email_provider_latency_seconds{provider,outcome}`;
+  - `email_send_attempts` (intentos hasta `SENT` o `FAILED`);
+  - `email_tenant_bounce_rate{tenant}` y `email_tenant_complaint_rate{tenant}`;
+  - `email_purged_rows_total{data}`.
+- **Alertas** (README, "Alertas"): `QUEUE_AGE`, `FAILED_RATE`, `TENANT_PAUSED`, `CIRCUIT_BREAKER_OPEN`, `LOST_LOCK`, `IDEMPOTENCY_CONFLICT`, `COMPLAINT_RATE`, `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`.
+- **Logs (AC-24.3):** el worker y los webhooks añaden `tenantSlug` y `messageId` al MDC. `EmailAddresses.masked` es la única forma admitida de mostrar una dirección; hoy ninguna línea de log la necesita.
+
+**(rev. 2026-10-13) Fuente de la hora: el `Clock` de la aplicación o `now()` de PostgreSQL.**
+
+Regla: una decisión usa una sola fuente en sus dos extremos. Si compara con columnas escritas por la base de datos, la decisión se toma en SQL con `now()`. Si su estado vive en memoria o lo escribe la aplicación, usa el bean `Clock`, que los tests pueden fijar.
+
+| Fuente | Decisiones | Por qué |
+|---|---|---|
+| `now()` de PostgreSQL | Toma de la cola (`next_attempt_at <= now()`), locks y barrido, `first_attempt_at`, `sent_at`, `finalized_at`, purgas, anomalías, métricas de cola y tiempo aceptación → `SENT` (NFR-19), expiración de API keys | Los datos y el corte se miden con el mismo reloj, en la misma sentencia |
+| `Clock` de la aplicación | Circuit breaker, `401` por IP, refresco de prefijos, deduplicación de alertas, ventanas del rate limit y su auditoría horaria, `Retry-After`, ventana de firma de webhooks, ventana de 23 h y próximo intento del worker | Estado en memoria o calculado por la aplicación; los tests lo fijan y lo avanzan sin depender de cuándo corren |
+
+**Puntos donde se encuentran las dos fuentes**, con un desfase de *s* segundos entre la aplicación y PostgreSQL:
+
+1. **Ventana de 23 h** (`first_attempt_at` lo escribe PostgreSQL y el worker lo compara con el `Clock`). La ventana efectiva queda en 23 h ± *s*. El límite que importa es el de idempotencia de Resend, 24 h desde el primer intento: queda 1 h de margen menos la duración de un intento (≤ `LOCK_TIMEOUT_SECONDS`, 60 s), así que es seguro mientras *s* < ~59 min. Con NTP, *s* es de milisegundos. La validación de arranque (AC-13.7) ya exige que backoff × 1,2 + intentos × lock < 23 h.
+2. **Próximo intento** (`next_attempt_at` lo escribe la aplicación y la toma de la cola lo compara con `now()`). El reintento se adelanta o retrasa *s*. El backoff mínimo es de 60 s ±20 %, y un `Retry-After` adelantado unos segundos solo produce otro `429` transitorio. Seguro.
+3. **Ventanas del rate limit** (`window_start` lo escribe la aplicación y la purga de contadores usa `now()` con un margen de 2 días). Seguro.
+4. **Hora de respaldo de un webhook sin `created_at`** (guardada en `occurred_at` junto a `received_at` de la BD). Solo afecta al orden de eventos que el proveedor no fechó. Seguro.
+5. **Corregido aquí:** el tiempo aceptación → `SENT` restaba `created_at` de la BD a la hora de la aplicación, y unos segundos de desfase sesgaban un objetivo de 5 s (NFR-19). Ahora `markSent` lo devuelve calculado en SQL (`sent_at - created_at`).
+
+**Rate limit con varias instancias de la API.** Pasó de `now()` de PostgreSQL al `Clock`:
+- **Por qué:** para que todas las decisiones de la aplicación usen una misma fuente que los tests pueden fijar. Antes los tests dependían del segundo del minuto real y usaban `sleep`.
+- **Qué no cambia:** el contador sigue siendo una sola fila por tenant, ventana y periodo en PostgreSQL, compartida por todas las instancias (AC-21.2).
+- **Qué cambia:** cada instancia elige la ventana con su reloj. Con un desfase de *s* entre instancias, solo las peticiones de los *s* segundos alrededor del cambio de minuto pueden contarse en la ventana vecina. Las ventanas fijas ya permiten hasta 2 × límite en 60 s seguidos que crucen el cambio de minuto, así que este efecto no cambia la garantía.
+- **Requisito:** las instancias deben tener la hora sincronizada (NTP), como ya exige la validación de firmas de webhooks (±5 min).
+
+Quedan fuera de la regla:
+- `System.nanoTime` como reloj monótono: el limitador de llamadas al proveedor (inyectable) y el intervalo del bucle del worker;
+- la hora de los UUID v7.
+
 **Salvaguardas anti-duplicados (rev. 2026-10):**
 1. `Idempotency-Key = message.id` hacia el proveedor (deduplicación de 24 h).
 2. Cierre con `lock_token`: un worker que perdió el lock no cierra ni reintenta.
@@ -173,6 +260,14 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `purgeIdempotencyKeys` | Horaria | Claves de idempotencia vencidas |
 | `emitQueueMetrics` | 30 s | Profundidad, antigüedad y mensajes retenidos |
 
+**(rev. 2026-10-12)** H7 completa la tabla con `PeriodicTasks`:
+- **`purgeVariables`** cada 15 min y **`purgeIdempotencyKeys`** cada hora.
+- **`purgeExpiredData`** diaria. Empieza 10 min después del arranque, para que despliegues frecuentes no la dejen sin ejecutar.
+- **`emitQueueMetrics`** cada 30 s: gauges, y alertas `QUEUE_AGE` y `FAILED_RATE`.
+- **`detectAnomalies`** cada 5 min.
+- **`providerAlerts`** cada 30 s: breaker abierto más de 10 min.
+- **Purgas en lotes:** 5 000 filas por lote, cada lote en su propia transacción con el advisory lock de la tarea.
+
 **(rev. 2026-10-07)** En H4 existe `reclaimStuckMessages`; las demás tareas llegan con sus hitos. Con varias instancias de worker, cada tarea se ejecuta dentro de `pg_try_advisory_xact_lock(hashtext('<tarea>'))`: si otra instancia la tiene, se salta esa vuelta. **(rev. 2026-10)** Se elimina la tabla `scheduled_lock`. No se añade Quartz ni ShedLock.
 
 ## 6. Configuración (variables de entorno) (rev. 2026-10)
@@ -187,11 +282,12 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `DB_OWNER_USER` / `DB_OWNER_PASSWORD` | — | Rol `email_owner`, solo con `APP_ROLE=migrate` |
 | `ADMIN_API_KEYS` | — | Credenciales de `/admin/v1/**`, separadas por comas (obligatoria, sin default). **(rev. 2026-10-06)** Solo se exige con `APP_ROLE=api\|all` (el worker y `migrate` nunca la reciben); cada una de ≥ 32 caracteres |
 | `TRUSTED_PROXIES` | *(vacío)* | CIDR de proxies cuya `X-Forwarded-For` se acepta |
+| `AUTH_FAILURES_PER_MINUTE_PER_IP` | `30` | **(rev. 2026-10-12)** Fallos de autenticación por IP y minuto antes de limitar a esa IP las peticiones sin prefijo de key conocido (`08` §4) |
 | `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
 | `RESEND_API_KEY` | — | Secreto; **obligatoria** con `MAIL_PROVIDER=resend` (rev. 2026-10-10). Nunca se registra en logs |
 | `RESEND_API_URL` | `https://api.resend.com` | (rev. 2026-10-10) Base de la API; debe ser `https` salvo con `APP_ENV=local` (pruebas contra un stub) |
-| `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación |
-| `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp |
+| `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación. **(rev. 2026-10-11)** Obligatorio con `MAIL_PROVIDER=resend` y `APP_ROLE=api\|all`; cada valor `whsec_` + base64. Sin él, `/webhooks/resend` no existe |
+| `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp (1–3600) |
 | `SMTP_HOST` / `SMTP_PORT` | `mailpit` / `1025` | Modo desarrollo |
 | `ALLOW_SMTP_IN_PRODUCTION` | `false` | Fail-fast si `production` + `smtp` |
 | `PROVIDER_CONNECT_TIMEOUT_MS` / `PROVIDER_READ_TIMEOUT_MS` | `3000` / `10000` | Timeouts hacia el proveedor |
@@ -205,8 +301,8 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `DEFAULT_RATE_LIMIT_PER_MINUTE` | `60` | Por tenant |
 | `DEFAULT_DAILY_QUOTA` | `1000` | Por tenant (fijar ~3× el volumen esperado) |
 | `DEFAULT_RETENTION_DAYS` | `90` | Por tenant |
-| `VARIABLES_RETENTION_DAYS` | `7` | Tras el estado final (AC-23.5) |
-| `IDEMPOTENCY_RETENTION_HOURS` | `24` | AC-08.5 |
+| `VARIABLES_RETENTION_DAYS` | `7` | Tras el estado final (AC-23.5). **(rev. 2026-10-12)** De 1 a 90 |
+| `IDEMPOTENCY_RETENTION_HOURS` | `24` | AC-08.5. **(rev. 2026-10-12)** Al menos 24: una repetición dentro de la ventana debe encontrar su mensaje |
 | `SENT_FINAL_AFTER_HOURS` | `72` | `SENT` sin eventos = final por tiempo |
 | `MAX_REQUEST_BYTES` | `262144` | Tamaño de payload |
 | `MAX_BATCH_ITEMS` / `MAX_BATCH_BYTES` | `100` / `1048576` | Endpoint de lote |
@@ -215,9 +311,9 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 | `SUPPRESSION_REJECT_MODE` | `accept` | `accept` (202 + `FAILED`) \| `reject` (422) |
 | `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria). **(rev. 2026-10-07)** ≥ 32 caracteres; se exige en todos los roles salvo `migrate` |
 | `ALLOWED_RECIPIENT_DOMAINS` | *(vacío)* | Allowlist de destino; **obligatoria** en `staging` |
-| `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta |
-| `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34 |
-| `BOUNCE_PAUSE_RATE` / `COMPLAINT_PAUSE_RATE` | `0.04` / `0.001` | FR-34 |
+| `QUEUE_AGE_ALERT_SECONDS` | `300` | Umbral de `DEGRADED` y de alerta. **(rev. 2026-10-12)** Al menos 30 |
+| `ANOMALY_VOLUME_MULTIPLIER` / `ANOMALY_MIN_HOURLY` | `3` / `50` | FR-34. **(rev. 2026-10-12)** Valores por defecto de cada tenant. `anomalyOverrides` puede cambiar el multiplicador y subir el mínimo horario, nunca bajarlo |
+| `BOUNCE_PAUSE_RATE` / `COMPLAINT_PAUSE_RATE` | `0.04` / `0.001` | FR-34; ajustables por tenant con `anomalyOverrides`. Ambos entre 0 y 1 |
 
 Ninguna credencial vive en la base de datos ni en el repositorio (`08-seguridad.md`). La configuración se valida al arrancar (NFR-09).
 

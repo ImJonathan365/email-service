@@ -7,11 +7,14 @@ import java.net.http.HttpResponse;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
 
 import com.emailservice.support.IntegrationTest;
 
 /** Configuration-driven policies: recipient allowlist (AC-09.4) and SUPPRESSION_REJECT_MODE=reject (AC-10.1). */
+// A one-off configuration: closed after this class so its pools do not stay open for the rest of the suite.
+@DirtiesContext
 @TestPropertySource(properties = { "app.sending.allowed-recipient-domains=example.test",
 		"app.sending.suppression-reject-mode=reject" })
 class SendingPolicyConfigTest extends IntegrationTest {

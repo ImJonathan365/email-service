@@ -10,6 +10,8 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.emailservice.audit.Actor;
 import com.emailservice.audit.AuditAction;
@@ -22,6 +24,7 @@ import com.emailservice.common.config.AppProperties;
 import com.emailservice.common.web.Cidr;
 import com.emailservice.tenancy.ApiKeyFormat;
 import com.emailservice.tenancy.Scope;
+import com.emailservice.tenancy.auth.KnownKeyPrefixes;
 
 /** Issuance, listing and revocation of tenant API keys (FR-03, FR-33), audited (AC-03.6). */
 @Service
@@ -39,11 +42,15 @@ class ApiKeyAdminService {
 
 	private final SecureRandom random = new SecureRandom();
 
-	ApiKeyAdminService(ApiKeyRepository keys, TenantRepository tenants, AuditLog auditLog, AppProperties properties) {
+	private final KnownKeyPrefixes knownPrefixes;
+
+	ApiKeyAdminService(ApiKeyRepository keys, TenantRepository tenants, AuditLog auditLog, AppProperties properties,
+			KnownKeyPrefixes knownPrefixes) {
 		this.keys = keys;
 		this.tenants = tenants;
 		this.auditLog = auditLog;
 		this.env = properties.env();
+		this.knownPrefixes = knownPrefixes;
 	}
 
 	@Transactional("systemTransactionManager")
@@ -69,6 +76,7 @@ class ApiKeyAdminService {
 				metadata.put("expiresAt", key.expiresAt() == null ? null : key.expiresAt().toString());
 				auditLog.record(keys.jdbc(), actor, AuditAction.API_KEY_ISSUED, tenantId, "api_key",
 						key.id().toString(), metadata);
+				afterCommit(() -> knownPrefixes.added(key.keyPrefix()));
 				return new ApiKeyViews.Issued(key.id(), key.name(), generated.token(), key.keyPrefix(), key.scopes(),
 						key.allowedCidrs(), key.expiresAt(), key.createdAt(), ApiKeyViews.Issued.WARNING);
 			}
@@ -89,10 +97,22 @@ class ApiKeyAdminService {
 		if (revoked.isPresent()) {
 			auditLog.record(keys.jdbc(), actor, AuditAction.API_KEY_REVOKED, revoked.get().tenantId(), "api_key",
 					id.toString(), Map.of("keyPrefix", revoked.get().keyPrefix()));
+			String prefix = revoked.get().keyPrefix();
+			afterCommit(() -> knownPrefixes.removed(prefix));
 		}
 		else if (!keys.exists(id)) {
 			throw new ApiException(ErrorCode.RESOURCE_NOT_FOUND, "API key not found.");
 		}
+	}
+
+	/** The in-memory prefix set follows only what the database actually committed. */
+	private static void afterCommit(Runnable action) {
+		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+			@Override
+			public void afterCommit() {
+				action.run();
+			}
+		});
 	}
 
 	private UUID tenantId(String slug) {

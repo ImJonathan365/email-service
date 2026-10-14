@@ -104,7 +104,7 @@ class TenantAdminService {
 		var normalized = new TenantRequests.Update(request.name(), request.fromEmail(), request.fromName(),
 				request.replyTo(), fromDomains, linkHosts, request.locale(), request.timezone(),
 				request.rateLimitPerMinute(), request.dailyQuota(), request.retentionDays(),
-				request.storeRenderedContent(), request.status());
+				request.storeRenderedContent(), request.status(), request.anomalyOverrides());
 		TenantView updated = tenants.update(current.id(), normalized);
 
 		List<String> changedFields = changedFields(request);
@@ -185,6 +185,7 @@ class TenantAdminService {
 		fields.put("dailyQuota", request.dailyQuota());
 		fields.put("retentionDays", request.retentionDays());
 		fields.put("storeRenderedContent", request.storeRenderedContent());
+		fields.put("anomalyOverrides", request.anomalyOverrides());
 		return fields.entrySet().stream().filter(e -> e.getValue() != null).map(Map.Entry::getKey).toList();
 	}
 

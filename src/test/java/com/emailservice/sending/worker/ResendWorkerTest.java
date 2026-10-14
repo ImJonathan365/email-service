@@ -11,26 +11,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 
-import com.emailservice.provider.EmailSender;
 import com.emailservice.provider.resend.ResendEmailSender;
 import com.emailservice.sending.SendingTestSupport;
 import com.emailservice.support.AdminApi;
 import com.emailservice.support.AuditRows;
-import com.emailservice.support.IntegrationTest;
-import com.emailservice.support.MutableClock;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
@@ -42,9 +38,9 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * The worker with the real Resend adapter against WireMock (NFR-04, AC-13.9, docs/05 §4): lost
  * responses, the circuit breaker and configuration errors. No network beyond localhost, no email.
+ * The shared recording provider delegates to the adapter, so this runs in the common context.
  */
-@Import(ResendWorkerTest.WireMockResend.class)
-class ResendWorkerTest extends IntegrationTest {
+class ResendWorkerTest extends WorkerTest {
 
 	static final WireMockServer RESEND = new WireMockServer(wireMockConfig().dynamicPort());
 
@@ -52,35 +48,11 @@ class ResendWorkerTest extends IntegrationTest {
 		RESEND.start();
 	}
 
-	@TestConfiguration
-	static class WireMockResend {
-
-		@Bean
-		@Primary
-		EmailSender wireMockResendSender(JsonMapper jsonMapper) {
-			return new ResendEmailSender(RESEND.baseUrl(), "re_test_key", Duration.ofSeconds(2), Duration.ofSeconds(2),
-					jsonMapper);
-		}
-
-		@Bean
-		@Primary
-		MutableClock mutableClock() {
-			return new MutableClock();
-		}
-
-	}
-
-	@Autowired
-	QueueWorker worker;
-
-	@Autowired
-	CircuitBreaker breaker;
-
-	@Autowired
-	MutableClock clock;
-
 	@Autowired
 	MeterRegistry meters;
+
+	@Autowired
+	JsonMapper jsonMapper;
 
 	SendingTestSupport a;
 
@@ -92,9 +64,20 @@ class ResendWorkerTest extends IntegrationTest {
 	@BeforeEach
 	void setUp() throws Exception {
 		RESEND.resetAll();
-		breaker.onSuccess();
-		WorkerTest.cancelPendingMessages();
+		ResendEmailSender resend = new ResendEmailSender(RESEND.baseUrl(), "re_test_key", Duration.ofSeconds(2),
+				Duration.ofSeconds(2), jsonMapper, clock);
+		sender.behave(resend::send);
 		a = new SendingTestSupport(http(), "SECURITY");
+		// The breaker's 60 s must not depend on how long the test takes: time moves only when advanced.
+		clock.fixAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+	}
+
+	/** The breaker and the clock are shared with every other test: leave them as found. */
+	@AfterEach
+	void restoreSharedState() {
+		sender.reset();
+		clock.reset();
+		breaker.onSuccess();
 	}
 
 	UUID accept(SendingTestSupport tenant) throws Exception {

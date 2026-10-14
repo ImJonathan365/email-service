@@ -3,6 +3,7 @@ package com.emailservice.sending.worker;
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -102,13 +103,14 @@ class QueueRepository {
 
 	/** The pinned version's content and the tenant settings a send needs (AC-12.2). */
 	record SendContext(String subjectTemplate, String htmlTemplate, String textTemplate, String variablesSchema,
-			String timezone, boolean tenantHeld) {
+			String timezone, boolean tenantHeld, boolean storeRenderedContent, String tenantSlug) {
 	}
 
 	SendContext context(UUID tenantId, UUID templateVersionId) {
 		return jdbc.sql("""
 				SELECT v.subject_template, v.html_template, v.text_template, v.variables_schema::text AS schema,
-				       t.timezone, (t.status <> 'ACTIVE' OR t.sending_paused_at IS NOT NULL) AS held
+				       t.timezone, (t.status <> 'ACTIVE' OR t.sending_paused_at IS NOT NULL) AS held,
+				       t.store_rendered_content, t.slug
 				FROM template_version v JOIN tenant t ON t.id = v.tenant_id
 				WHERE v.tenant_id = :tenantId AND v.id = :versionId
 				""")
@@ -116,7 +118,7 @@ class QueueRepository {
 			.param("versionId", templateVersionId)
 			.query((rs, row) -> new SendContext(rs.getString("subject_template"), rs.getString("html_template"),
 					rs.getString("text_template"), rs.getString("schema"), rs.getString("timezone"),
-					rs.getBoolean("held")))
+					rs.getBoolean("held"), rs.getBoolean("store_rendered_content"), rs.getString("slug")))
 			.single();
 	}
 
@@ -133,24 +135,39 @@ class QueueRepository {
 			.optional();
 	}
 
+	/** The copy of the content kept for the tenant (AC-19.3), already without sensitive values. */
+	record StoredContent(String subject, String html, String text) {
+	}
+
 	/**
 	 * SENT, fenced. Sensitive variables go in the same statement (AC-23.5); finalized_at stays
-	 * null because SENT is not terminal. Returns false when the lock was lost.
+	 * null because SENT is not terminal. {@code stored} is null unless the tenant keeps rendered
+	 * content. Returns the time from acceptance to SENT, both read from the database clock (NFR-19),
+	 * or empty when the lock was lost.
 	 */
-	boolean markSent(Claimed message, String provider, String providerMessageId, String variables) {
+	Optional<Duration> markSent(Claimed message, String provider, String providerMessageId, String variables,
+			StoredContent stored) {
 		return jdbc.sql("""
 				UPDATE email_message
 				SET status = 'SENT', provider = :provider, provider_message_id = :providerMessageId, sent_at = now(),
 				    variables = CAST(:variables AS jsonb), lock_token = NULL, lock_expires_at = NULL,
-				    locked_by = NULL, updated_at = now()
+				    locked_by = NULL, updated_at = now(),
+				    rendered_subject = coalesce(:renderedSubject, rendered_subject),
+				    rendered_html = coalesce(:renderedHtml, rendered_html),
+				    rendered_text = coalesce(:renderedText, rendered_text)
 				WHERE id = :id AND status = 'SENDING' AND lock_token = :token
+				RETURNING (extract(epoch FROM sent_at - created_at) * 1000)::bigint AS millis
 				""")
 			.param("provider", provider)
 			.param("providerMessageId", providerMessageId)
 			.param("variables", variables)
+			.param("renderedSubject", stored == null ? null : stored.subject())
+			.param("renderedHtml", stored == null ? null : stored.html())
+			.param("renderedText", stored == null ? null : stored.text())
 			.param("id", message.id())
 			.param("token", message.lockToken())
-			.update() == 1;
+			.query((rs, row) -> Duration.ofMillis(rs.getLong("millis")))
+			.optional();
 	}
 
 	/** Terminal FAILED, fenced, with sensitive variables removed and finalized_at set. */
@@ -229,9 +246,9 @@ class QueueRepository {
 	 * Reclaims SENDING messages whose lock expired (AC-11.3): back to QUEUED keeping the attempts
 	 * already counted, or FAILED once they are exhausted. Must run inside a system transaction:
 	 * the advisory lock lasts for that transaction, so only one instance sweeps at a time
-	 * (docs/05 §5). Returns the ids that became FAILED.
+	 * (docs/05 §5). Returns the messages that became FAILED.
 	 */
-	List<UUID> reclaimExpired(int maxAttempts) {
+	List<MessageKey> reclaimExpired(int maxAttempts) {
 		Boolean acquired = jdbc.sql("SELECT pg_try_advisory_xact_lock(hashtext('reclaimStuckMessages'))")
 			.query(Boolean.class)
 			.single();
@@ -247,15 +264,19 @@ class QueueRepository {
 				    lock_token = NULL, lock_expires_at = NULL, locked_by = NULL, updated_at = now(),
 				    attempt_log = %s
 				WHERE status = 'SENDING' AND lock_expires_at < now()
-				RETURNING id, status
+				RETURNING id, tenant_id, status
 				""".formatted(APPEND_LOG))
 			.param("maxAttempts", maxAttempts)
 			.param("code", "LOCK_EXPIRED")
-			.query((rs, row) -> "FAILED".equals(rs.getString("status")) ? rs.getObject("id", UUID.class) : null)
+			.query((rs, row) -> "FAILED".equals(rs.getString("status"))
+					? new MessageKey(rs.getObject("tenant_id", UUID.class), rs.getObject("id", UUID.class)) : null)
 			.list()
 			.stream()
 			.filter(Objects::nonNull)
 			.toList();
+	}
+
+	record MessageKey(UUID tenantId, UUID id) {
 	}
 
 	record StoredVariables(String variables, String variablesSchema) {

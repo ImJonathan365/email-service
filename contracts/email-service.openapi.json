@@ -1,6 +1,25 @@
 {
   "components" : {
     "schemas" : {
+      "Create" : {
+        "properties" : {
+          "email" : {
+            "example" : "bad@example.com",
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "note" : {
+            "example" : "Requested by the user",
+            "maxLength" : 500,
+            "minLength" : 0,
+            "pattern" : "[^\\r\\n]*",
+            "type" : "string"
+          }
+        },
+        "required" : [ "email" ],
+        "type" : "object"
+      },
       "CreateTemplate" : {
         "properties" : {
           "category" : {
@@ -31,6 +50,120 @@
           }
         },
         "required" : [ "category", "key", "name" ],
+        "type" : "object"
+      },
+      "Detail" : {
+        "properties" : {
+          "attempts" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "bcc" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "cc" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "clickCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "deliveredAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "events" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Event"
+            },
+            "type" : "array"
+          },
+          "failureCode" : {
+            "type" : "string"
+          },
+          "failureDetail" : {
+            "type" : "string"
+          },
+          "firstClickedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "firstOpenedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lastError" : {
+            "type" : "string"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "metadata" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "openCount" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "provider" : {
+            "type" : "string"
+          },
+          "providerMessageId" : {
+            "type" : "string"
+          },
+          "renderedHtml" : {
+            "type" : "string"
+          },
+          "renderedSubject" : {
+            "type" : "string"
+          },
+          "renderedText" : {
+            "type" : "string"
+          },
+          "sentAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "items" : {
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "templateKey" : {
+            "type" : "string"
+          },
+          "templateVersion" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "to" : {
+            "type" : "string"
+          }
+        },
         "type" : "object"
       },
       "EmailAccepted" : {
@@ -74,6 +207,18 @@
         },
         "type" : "object"
       },
+      "Event" : {
+        "properties" : {
+          "occurredAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "JointPublishRequest" : {
         "properties" : {
           "versions" : {
@@ -103,11 +248,118 @@
         },
         "type" : "object"
       },
+      "JsonNode" : {
+        "properties" : {
+          "array" : {
+            "type" : "boolean"
+          },
+          "bigDecimal" : {
+            "type" : "boolean"
+          },
+          "bigInteger" : {
+            "type" : "boolean"
+          },
+          "binary" : {
+            "type" : "boolean"
+          },
+          "boolean" : {
+            "type" : "boolean"
+          },
+          "container" : {
+            "type" : "boolean"
+          },
+          "double" : {
+            "type" : "boolean"
+          },
+          "embeddedValue" : {
+            "type" : "boolean"
+          },
+          "empty" : {
+            "type" : "boolean"
+          },
+          "float" : {
+            "type" : "boolean"
+          },
+          "floatingPointNumber" : {
+            "type" : "boolean"
+          },
+          "int" : {
+            "type" : "boolean"
+          },
+          "integralNumber" : {
+            "type" : "boolean"
+          },
+          "long" : {
+            "type" : "boolean"
+          },
+          "missingNode" : {
+            "type" : "boolean"
+          },
+          "nodeType" : {
+            "enum" : [ "ARRAY", "BINARY", "BOOLEAN", "MISSING", "NULL", "NUMBER", "OBJECT", "POJO", "STRING" ],
+            "type" : "string"
+          },
+          "null" : {
+            "type" : "boolean"
+          },
+          "number" : {
+            "type" : "boolean"
+          },
+          "object" : {
+            "type" : "boolean"
+          },
+          "pojo" : {
+            "type" : "boolean"
+          },
+          "short" : {
+            "type" : "boolean"
+          },
+          "string" : {
+            "type" : "boolean"
+          },
+          "textual" : {
+            "deprecated" : true,
+            "type" : "boolean"
+          },
+          "valueNode" : {
+            "type" : "boolean"
+          }
+        },
+        "type" : "object"
+      },
+      "ListResponseSummary" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/Summary"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "ListResponseTemplateSummary" : {
         "properties" : {
           "data" : {
             "items" : {
               "$ref" : "#/components/schemas/TemplateSummary"
+            },
+            "type" : "array"
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "ListResponseTenantView" : {
+        "properties" : {
+          "data" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TenantView"
             },
             "type" : "array"
           },
@@ -256,6 +508,28 @@
         "required" : [ "templateKey", "to", "variables" ],
         "type" : "object"
       },
+      "Summary" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "templateKey" : {
+            "type" : "string"
+          },
+          "to" : {
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
       "Template" : {
         "properties" : {
           "category" : {
@@ -356,6 +630,30 @@
           },
           "updatedAt" : {
             "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "type" : "object"
+      },
+      "TenantView" : {
+        "properties" : {
+          "createdAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "emailMasked" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "scope" : {
             "type" : "string"
           }
         },
@@ -483,6 +781,96 @@
   "openapi" : "3.1.0",
   "paths" : {
     "/v1/emails" : {
+      "get" : {
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "pattern" : "QUEUED|SENDING|SENT|DELIVERED|BOUNCED|COMPLAINED|FAILED|CANCELED",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "templateKey",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "to",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 254,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "tag",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "createdAfter",
+          "required" : false,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "createdBefore",
+          "required" : false,
+          "schema" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseSummary"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "List messages, newest first, with filters and a cursor (FR-20)",
+        "tags" : [ "Emails" ]
+      },
       "post" : {
         "operationId" : "send",
         "parameters" : [ {
@@ -520,6 +908,130 @@
         } ],
         "summary" : "Send a transactional email: 202 when queued, 200 for an idempotent repeat (FR-07, FR-08)",
         "tags" : [ "Emails" ]
+      }
+    },
+    "/v1/emails/{id}" : {
+      "get" : {
+        "operationId" : "get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "State, attempts and event history of one message (FR-19)",
+        "tags" : [ "Emails" ]
+      }
+    },
+    "/v1/suppressions" : {
+      "get" : {
+        "operationId" : "list_1",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "reason",
+          "required" : false,
+          "schema" : {
+            "pattern" : "HARD_BOUNCE|COMPLAINT|PROVIDER|MANUAL",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 50,
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ListResponseTenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "List own and global suppressions; global addresses are masked (AC-18.1)",
+        "tags" : [ "Suppressions" ]
+      },
+      "post" : {
+        "operationId" : "add",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/Create"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantView"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Add a MANUAL suppression for this tenant; 201 when new, 200 when it already existed (AC-18.2)",
+        "tags" : [ "Suppressions" ]
+      }
+    },
+    "/v1/suppressions/{email}" : {
+      "delete" : {
+        "operationId" : "remove",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "email",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          }
+        },
+        "summary" : "Remove this tenant's MANUAL suppression; a global one needs an administrator (AC-18.3)",
+        "tags" : [ "Suppressions" ]
       }
     },
     "/v1/templates" : {
@@ -837,6 +1349,57 @@
         } ],
         "summary" : "Publish a draft; it becomes immutable and archives the previous one of its locale (FR-05)",
         "tags" : [ "Templates" ]
+      }
+    },
+    "/webhooks/{provider}" : {
+      "post" : {
+        "operationId" : "receive",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "svix-id",
+          "required" : true
+        }, {
+          "in" : "header",
+          "name" : "svix-timestamp",
+          "required" : true
+        }, {
+          "in" : "header",
+          "name" : "svix-signature",
+          "required" : true
+        }, {
+          "in" : "path",
+          "name" : "provider",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "format" : "byte",
+                "type" : "string"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "204" : {
+            "description" : "Processed, duplicate or orphan"
+          },
+          "400" : {
+            "description" : "Authentic but unreadable body"
+          },
+          "401" : {
+            "description" : "Invalid or missing signature, or outside the window"
+          },
+          "503" : {
+            "description" : "Database unavailable; the provider retries"
+          }
+        },
+        "summary" : "Provider events, authenticated by the provider's signature (FR-16, FR-17)",
+        "tags" : [ "Provider webhooks" ]
       }
     }
   },

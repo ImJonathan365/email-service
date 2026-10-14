@@ -110,23 +110,27 @@ class AppPropertiesTest {
 	@Test
 	void tenantDefaultsAndLocalesAreValidated() {
 		assertThat(apiWith(null, ADMIN, null).tenancy()).isEqualTo(Tenancy.DEFAULTS);
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(0, 1000, 90, List.of("es-CR"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(0, 1000, 90, List.of("es-CR"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("DEFAULT_RATE_LIMIT_PER_MINUTE");
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, -1, 90, List.of("es-CR"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, -1, 90, List.of("es-CR"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("DEFAULT_DAILY_QUOTA");
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 401, List.of("es-CR"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 401, List.of("es-CR"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("DEFAULT_RETENTION_DAYS");
-		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR", "fr"))))
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR", "fr"), 3, 50, 0.04, 0.001)))
 			.hasMessageContaining("SUPPORTED_LOCALES");
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR"), 0.5, 50, 0.04, 0.001)))
+			.hasMessageContaining("ANOMALY_VOLUME_MULTIPLIER");
+		assertThatThrownBy(() -> apiWith(null, ADMIN, new Tenancy(60, 1000, 90, List.of("es-CR"), 3, 50, 1.5, 0.001)))
+			.hasMessageContaining("BOUNCE_PAUSE_RATE");
 	}
 
 	@Test
 	void trustedProxiesMustBeValidCidrs() {
-		assertThat(apiWith(new Http(List.of(" 10.0.0.0/8 ", "192.168.1.10")), ADMIN, null).http().trustedProxyRanges())
+		assertThat(apiWith(new Http(List.of(" 10.0.0.0/8 ", "192.168.1.10"), 30), ADMIN, null).http().trustedProxyRanges())
 			.hasSize(2);
-		assertThatThrownBy(() -> apiWith(new Http(List.of("10.0.0.1/8")), ADMIN, null))
+		assertThatThrownBy(() -> apiWith(new Http(List.of("10.0.0.1/8"), 30), ADMIN, null))
 			.hasMessageContaining("TRUSTED_PROXIES");
-		assertThatThrownBy(() -> apiWith(new Http(List.of("proxy.internal")), ADMIN, null))
+		assertThatThrownBy(() -> apiWith(new Http(List.of("proxy.internal"), 30), ADMIN, null))
 			.hasMessageContaining("TRUSTED_PROXIES");
 	}
 
@@ -164,25 +168,57 @@ class AppPropertiesTest {
 	void resendNeedsItsKeyAndAnHttpsEndpointOutsideLocal() {
 		AppProperties.Mail resend = new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000);
 		Db db = new Db(URL, APP, SYSTEM, NONE);
-		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider(" ", null, 8, 5, 60)))
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider(" ", null, 8, 5, 60, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("RESEND_API_KEY");
 		assertThatThrownBy(
-				() -> resend(AppEnv.STAGING, new AppProperties.Provider("re_secret", "http://resend.test", 8, 5, 60)))
+				() -> resend(AppEnv.STAGING, new AppProperties.Provider("re_secret", "http://resend.test", 8, 5, 60, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("RESEND_API_URL")
 			.message()
 			.doesNotContain("re_secret");
-		assertThat(resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", "http://localhost:8089", 8, 5, 60))
+		assertThat(resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", "http://localhost:8089", 8, 5, 60, WEBHOOK_SECRETS, 300))
 			.provider()
 			.resendApiUrl()).isEqualTo("http://localhost:8089");
-		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 0, 5, 60)))
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 0, 5, 60, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("WORKER_PROVIDER_RPS");
-		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 0, 0)))
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 0, 0, WEBHOOK_SECRETS, 300)))
 			.hasMessageContaining("CIRCUIT_BREAKER_FAILURES")
 			.hasMessageContaining("CIRCUIT_BREAKER_OPEN_SECONDS");
 		AppProperties production = new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, db, null, null, null, resend,
-				SENDING, null, new AppProperties.Provider("re_secret", null, 8, 5, 60));
+				SENDING, null, new AppProperties.Provider("re_secret", null, 8, 5, 60, WEBHOOK_SECRETS, 300));
 		assertThat(production.provider().resendApiUrl()).isEqualTo("https://api.resend.com");
 		assertThat(production.toString()).doesNotContain("re_secret");
+	}
+
+	/** Fictional, test-only Svix secret. */
+	static final String WEBHOOK_SECRET = "whsec_dGVzdC1vbmx5LXdlYmhvb2stc2VjcmV0LTAwMDE="; // gitleaks:allow
+
+	static final List<String> WEBHOOK_SECRETS = List.of(WEBHOOK_SECRET);
+
+	@Test
+	void ac_16_1_webhookSecretsAreRequiredForTheResendApiAndNeverPrinted() {
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 5, 60, List.of(), 300)))
+			.hasMessageContaining("MAIL_WEBHOOK_SIGNING_SECRET is required");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL,
+				new AppProperties.Provider("re_secret", null, 8, 5, 60, List.of("not-a-secret"), 300)))
+			.hasMessageContaining("whsec_")
+			.message()
+			.doesNotContain("not-a-secret");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 5, 60,
+				List.of(WEBHOOK_SECRET, WEBHOOK_SECRET, WEBHOOK_SECRET), 300)))
+			.hasMessageContaining("one or two");
+		assertThatThrownBy(() -> resend(AppEnv.LOCAL,
+				new AppProperties.Provider("re_secret", null, 8, 5, 60, WEBHOOK_SECRETS, 7200)))
+			.hasMessageContaining("WEBHOOK_TOLERANCE_SECONDS");
+		AppProperties rotating = resend(AppEnv.LOCAL, new AppProperties.Provider("re_secret", null, 8, 5, 60,
+				List.of(WEBHOOK_SECRET, " whsec_dGVzdC1vbmx5LXdlYmhvb2stc2VjcmV0LTAwMDI= "), 0)); // gitleaks:allow
+		assertThat(rotating.provider().webhookSigningSecrets()).hasSize(2);
+		assertThat(rotating.provider().webhookToleranceSeconds()).isEqualTo(300);
+		assertThat(rotating.toString()).doesNotContain("whsec_");
+		// A worker never receives webhooks, so it does not need the secret.
+		assertThat(new AppProperties(AppEnv.PRODUCTION, AppRole.WORKER, new Db(URL, APP, SYSTEM, NONE), null, null,
+				null, new AppProperties.Mail("resend", null, 0, false, 3_000, 10_000), SENDING, null,
+				new AppProperties.Provider("re_secret", null, 8, 5, 60, List.of(), 300)))
+			.isNotNull();
 	}
 
 	private static AppProperties resend(AppEnv env, AppProperties.Provider provider) {
@@ -219,16 +255,30 @@ class AppPropertiesTest {
 	void ac_13_3_and_13_7_retryPolicyMustBeCoherentAndFitTheIdempotencyWindow() {
 		assertThat(local(NOOP_MAIL, SENDING, null).worker().maxAttempts()).isEqualTo(6);
 		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
-				new AppProperties.Worker(4, 1_000, 5, List.of(60, 300, 900, 3_600, 21_600), 60)))
+				new AppProperties.Worker(4, 1_000, 5, List.of(60, 300, 900, 3_600, 21_600), 60, 7, 24, 72, 300)))
 			.hasMessageContaining("AC-13.3");
 		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
-				new AppProperties.Worker(4, 1_000, 3, List.of(36_000, 36_000), 60)))
+				new AppProperties.Worker(4, 1_000, 3, List.of(36_000, 36_000), 60, 7, 24, 72, 300)))
 			.hasMessageContaining("AC-13.7");
-		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING, new AppProperties.Worker(4, 1_000, 2, List.of(60), 10)))
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 2, List.of(60), 10, 7, 24, 72, 300)))
 			.hasMessageContaining("LOCK_TIMEOUT_SECONDS");
-		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING, new AppProperties.Worker(0, 50, 2, List.of(60), 60)))
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(0, 50, 2, List.of(60), 60, 7, 24, 72, 300)))
 			.hasMessageContaining("WORKER_CONCURRENCY")
 			.hasMessageContaining("WORKER_POLL_INTERVAL_MS");
+	}
+
+	@Test
+	void ac_23_5_and_ac_08_5_retentionsAreBounded() {
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 2, List.of(60), 60, 7, 12, 72, 300)))
+			.as("idempotency must cover its 24 h")
+			.hasMessageContaining("IDEMPOTENCY_RETENTION_HOURS");
+		assertThatThrownBy(() -> local(NOOP_MAIL, SENDING,
+				new AppProperties.Worker(4, 1_000, 2, List.of(60), 60, 365, 24, 72, 10)))
+			.hasMessageContaining("VARIABLES_RETENTION_DAYS")
+			.hasMessageContaining("QUEUE_AGE_ALERT_SECONDS");
 	}
 
 	@Test

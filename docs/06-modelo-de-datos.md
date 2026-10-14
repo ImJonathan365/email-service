@@ -126,6 +126,7 @@ Nueve tablas en el MVP: `tenant`, `api_key`, `template`, `template_version`, `em
 | `locale` | `text` | **(rev. 2026-10, ADR-0018)** Locale efectivo de la versión fijada |
 | `priority` | `smallint` | **(rev. 2026-10)** 0 `SECURITY`, 1 `TRANSACTIONAL`, 2 `NOTICE` |
 | `to_email` / `to_name` | `text` | Un destinatario principal |
+| `to_email_lower` | `text` generada (`lower(to_email)`, `STORED`) | **(rev. 2026-10-12, V4)** Para filtrar por destinatario con una igualdad de texto (ver la nota de V4 más abajo) |
 | `cc` / `bcc` | `text[]` NULL | Máx. 5 cada uno |
 | `from_email` / `from_name` / `reply_to` | `text` | Resueltos en la aceptación; `from_name` puede venir de la petición (AC-09.5) |
 | `variables` | `jsonb` | Necesarias para renderizar y reintentar; purgadas según AC-23.5 |
@@ -159,8 +160,8 @@ CREATE INDEX ix_msg_stuck ON email_message (lock_expires_at)
     WHERE status = 'SENDING';                             -- barrido de locks
 CREATE INDEX ix_msg_tenant_created ON email_message (tenant_id, created_at DESC);
 CREATE INDEX ix_msg_tenant_status ON email_message (tenant_id, status, created_at DESC);
-CREATE INDEX ix_msg_tenant_to ON email_message (tenant_id, lower(to_email), created_at DESC);
-CREATE INDEX ix_msg_to_global ON email_message (lower(to_email));   -- (rev. 2026-10) borrado por titular (FR-29)
+CREATE INDEX ix_msg_tenant_to ON email_message (tenant_id, lower(to_email), created_at DESC);   -- (rev. 2026-10-12) V4: (tenant_id, to_email_lower, created_at DESC, id DESC)
+CREATE INDEX ix_msg_to_global ON email_message (lower(to_email));   -- (rev. 2026-10) borrado por titular (FR-29); V4: (to_email_lower)
 CREATE INDEX ix_msg_purge ON email_message (finalized_at)
     WHERE variables_purged_at IS NULL AND finalized_at IS NOT NULL; -- (rev. 2026-10) purga de variables
 CREATE UNIQUE INDEX uq_msg_provider_id ON email_message (provider, provider_message_id)
@@ -168,6 +169,27 @@ CREATE UNIQUE INDEX uq_msg_provider_id ON email_message (provider, provider_mess
 CREATE UNIQUE INDEX uq_msg_idempotency ON email_message (tenant_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 ```
+
+**(rev. 2026-10-12) Índices del listado (V4, AC-20.2).**
+- **Por qué cambian:** con RLS, PostgreSQL solo usa un índice para condiciones *leakproof*. Las igualdades y comparaciones de `text`, `uuid` y `timestamptz` lo son; `lower()` y el operador de arrays `@>` no.
+- **Medición:** con el dataset de referencia, el filtro `to` sobre el índice de `lower(to_email)` hacía un recorrido secuencial (p95 990 ms). Los dos filtros pasan a ser igualdades de texto:
+  - **`to`:** la columna generada `to_email_lower`;
+  - **`tag`:** la tabla `email_message_tag`.
+- **Desempate por `id`:** los índices `(tenant_id, …, created_at DESC, id DESC)` incluyen `id`, que la paginación por cursor usa para desempatar.
+- **Regla para el futuro:** un filtro nuevo de la API de tenant debe expresarse con comparaciones *leakproof* sobre columnas indexadas.
+
+### 3.4.1 `email_message_tag` — índice de tags (rev. 2026-10-12, V4)
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `tenant_id`, `message_id` | `uuid` | FK compuesta a `email_message (tenant_id, id)` `ON DELETE CASCADE`: desaparece con el mensaje (purga, borrado por titular) |
+| `tag` | `text` | Uno de los `tags` del mensaje |
+| `created_at` | `timestamptz` | Copia de `email_message.created_at`, para ordenar desde el índice |
+
+- **Clave e índice:** PK `(tenant_id, message_id, tag)` e índice `(tenant_id, tag, created_at DESC, message_id DESC)`.
+- **Escritura:** un trigger `AFTER INSERT` sobre `email_message` escribe las filas en la misma transacción. Los tags no cambian después de aceptar el mensaje.
+- **Seguridad:** RLS `FORCE` con la misma política `tenant_isolation`; `email_app` y `email_system` tienen `SELECT`, `INSERT` y `DELETE`.
+- **Garantía por test:** un test de catálogo exige RLS `FORCE` en toda tabla con columna `tenant_id`.
 
 ### 3.5 `email_attachment` — NO SE CREA EN EL MVP (FR-30 Won't, ADR-0015 Rejected)
 
@@ -201,7 +223,7 @@ La fila (sin contenido) se conserva hasta la purga del mensaje, para que `GET /v
 | `provider_type` | `text` | **(rev. 2026-10)** Tipo original (`email.bounced`…) |
 | `occurred_at` | `timestamptz` | Según el proveedor |
 | `received_at` | `timestamptz` | Default `now()` |
-| `payload` | `jsonb` | **(rev. 2026-10)** Minimizado (AC-17.1) |
+| `payload` | `jsonb` | **(rev. 2026-10)** Minimizado (AC-17.1). **(rev. 2026-10-11)** Lista blanca de campos en `05` §4 (H6); nunca direcciones, asunto, cabeceras, IP, user agent ni la query de los clics |
 
 ### 3.7 `suppression` — direcciones bloqueadas (rev. 2026-10, ADR-0012)
 
@@ -541,3 +563,14 @@ GROUP BY 1;
 | `rate_limit_counter` | 2 días |
 | Logs (fuera de la BD) | 30 días en el destino de logs |
 | Respaldos | ≤ 35 días |
+
+**(rev. 2026-10-12) Implementado en H7 (V5):**
+- **Mensajes `QUEUED`/`SENDING`:** las purgas nunca los borran, por antiguos que sean (owner). Esto cubre, por ejemplo, la cola de un tenant pausado mucho tiempo.
+- **Final por tiempo:** `SENT` y `DELIVERED` cuentan como finales `SENT_FINAL_AFTER_HOURS` después de `sent_at`. `DELIVERED` es estable, no terminal: sin esta regla sus variables no se purgarían nunca.
+- **Borrado de un mensaje:** con él se van sus eventos, en la misma sentencia, y sus filas de `email_message_tag`, por la cascada.
+- **`audit_log`:**
+  - la función `purge_expired_audit_log(batch)` es `SECURITY DEFINER` de `email_owner`, con `search_path` fijo;
+  - solo `email_system` puede ejecutarla;
+  - como `email_owner` también está sujeto a RLS `FORCE`, la política `audit_retention` le deja ver y borrar únicamente las filas de más de 365 días;
+  - los roles de la app siguen sin `DELETE` sobre `audit_log`.
+- **Índices parciales para cada purga:** `ix_msg_purge_by_time`, `ix_msg_idempotency_age` e `ix_msg_rendered_age`, más `ix_msg_created` para la retención por tenant y las métricas por estado.

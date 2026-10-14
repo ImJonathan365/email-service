@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.emailservice.common.config.AppProperties;
+import com.emailservice.events.MessageEvents;
 import com.emailservice.common.config.RoleConditions.ConditionalOnWorkerRole;
 import com.emailservice.templates.schema.SensitiveVariables;
 import com.emailservice.templates.schema.VariablesSchema;
@@ -22,19 +23,25 @@ class StuckMessageSweeper {
 
 	private final JsonMapper jsonMapper;
 
+	private final MessageEvents messageEvents;
+
 	private final int maxAttempts;
 
-	StuckMessageSweeper(QueueRepository queue, JsonMapper jsonMapper, AppProperties properties) {
+	StuckMessageSweeper(QueueRepository queue, JsonMapper jsonMapper, MessageEvents messageEvents,
+			AppProperties properties) {
 		this.queue = queue;
 		this.jsonMapper = jsonMapper;
+		this.messageEvents = messageEvents;
 		this.maxAttempts = properties.worker().maxAttempts();
 	}
 
 	@Transactional("systemTransactionManager")
 	void reclaim() {
-		List<UUID> failed = queue.reclaimExpired(maxAttempts);
+		List<QueueRepository.MessageKey> failed = queue.reclaimExpired(maxAttempts);
 		// Exhausted messages are now terminal: their x-sensitive variables go too (AC-23.5).
-		for (UUID id : failed) {
+		for (QueueRepository.MessageKey key : failed) {
+			UUID id = key.id();
+			messageEvents.checkAfterFailed(key.tenantId(), id, "MAX_ATTEMPTS_EXCEEDED");
 			QueueRepository.StoredVariables stored = queue.variables(id);
 			VariablesSchema schema = VariablesSchema.parse(jsonMapper.readTree(stored.variablesSchema()), "variablesSchema");
 			queue.replaceVariables(id, jsonMapper

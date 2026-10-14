@@ -4,7 +4,7 @@ Microservicio interno de correo **transaccional** para PipeMend, Colmena, Chinam
 
 La fuente de verdad es [`docs/`](docs/README.md). Reglas para asistentes de IA: [`AGENTS.md`](AGENTS.md).
 
-> Estado: hitos H1 (esqueleto), H2 (tenancy), H3 (plantillas), H4 (envío de extremo a extremo con SMTP hacia Mailpit) y H5 (proveedor real: Resend, con circuit breaker y límite de tasa). Los webhooks del proveedor llegan en H6 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
+> Estado: hitos H1 (esqueleto), H2 (tenancy), H3 (plantillas), H4 (envío de extremo a extremo con SMTP hacia Mailpit), H5 (proveedor real: Resend, con circuit breaker y límite de tasa) y H6 (eventos: webhooks Svix, estados por precedencia y supresiones). Siguiente: H7 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
 
 ## Arranque local
 
@@ -84,6 +84,77 @@ Comprueba lo siguiente:
 - en la base, el mensaje pasa a `SENT` con `provider_message_id`.
 
 Los tests nunca llaman a Resend: usan WireMock en local.
+
+## Webhooks de Resend en staging
+
+Los eventos (entregado, rebote, queja, supresión) llegan a `POST /webhooks/resend`, firmados con Svix (FR-16). Resend necesita una URL pública con HTTPS. En staging, el balanceador debe exponer **solo** `/webhooks/*` (docs/05 §7).
+
+**Registrar el endpoint** (en el equipo de staging de Resend):
+1. En *Webhooks → Add endpoint*, pon la URL `https://<host de staging>/webhooks/resend`.
+2. Marca estos eventos: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.failed`, `email.suppressed`, `email.opened`, `email.clicked`, `suppression.added` y `suppression.removed`.
+3. Copia el *Signing secret* (`whsec_…`) directamente al gestor de secretos como `MAIL_WEBHOOK_SIGNING_SECRET` y reinicia las instancias `api`. Es obligatorio con `MAIL_PROVIDER=resend`: sin él, la API no arranca.
+4. **Rotación** (docs/08 §1):
+   - crea un segundo endpoint;
+   - pon los dos secretos separados por coma (`whsec_viejo,whsec_nuevo`);
+   - borra el endpoint viejo;
+   - deja solo el nuevo.
+
+**Prueba temporal con un túnel** (antes de que staging tenga host propio). Nunca expongas la aplicación entera: delante del túnel va un proxy que solo deja pasar `/webhooks/*`; `/v1` y `/admin` responden `404`.
+
+```bash
+# 1. La app con los valores de staging, desde el host, contra el PostgreSQL de compose.
+#    .env.staging está en .gitignore; contiene APP_ENV=staging, MAIL_PROVIDER=resend, RESEND_API_KEY,
+#    MAIL_WEBHOOK_SIGNING_SECRET, ALLOWED_RECIPIENT_DOMAINS (incluye resend.dev) y las variables de .env.
+docker compose up -d postgres
+set -a; source .env.staging; set +a; ./gradlew bootRun
+
+# 2. Proxy que solo reenvía /webhooks/* (otra terminal).
+printf ':8081 {\n\thandle /webhooks/* {\n\t\treverse_proxy localhost:8080\n\t}\n\trespond 404\n}\n' > /tmp/Caddyfile
+docker run --rm --network host -v /tmp/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2
+
+# 3. Túnel temporal hacia el proxy (otra terminal); imprime una URL https://<aleatorio>.trycloudflare.com
+cloudflared tunnel --url http://localhost:8081
+```
+
+Después:
+1. Registra `https://<aleatorio>.trycloudflare.com/webhooks/resend` como endpoint (pasos de arriba) y usa su secreto en `.env.staging`.
+2. Envía a las direcciones de prueba de Resend, con la prueba manual de la sección anterior:
+   - `delivered@resend.dev`: el mensaje pasa a `DELIVERED`;
+   - `bounced@resend.dev`: pasa a `BOUNCED` y se crea una supresión global `HARD_BOUNCE`;
+   - `complained@resend.dev`: pasa a `COMPLAINED` y se crea una supresión global `COMPLAINT`.
+3. En *Webhooks → \<endpoint\>* de Resend, cada entrega debe aparecer con `204`. Un `401` indica que el secreto no coincide.
+4. **Al terminar:**
+   - corta el túnel y el proxy (`Ctrl+C`);
+   - borra el endpoint temporal en Resend;
+   - retira las supresiones de prueba con `DELETE /admin/v1/suppressions/{email}`, y también en *Suppressions* de Resend.
+
+## Operación: alertas, salud y datos
+
+**Alertas.** Las alertas de NFR-11 son líneas de log JSON de nivel `ERROR` con el campo `alert`, y `alertSubject` indica a qué se refiere.
+- Una misma alerta para el mismo sujeto se emite como mucho una vez cada 15 minutos por instancia.
+- Para una alerta basada en logs en el hosting, filtra `level = ERROR` y el campo `alert` presente, y agrupa por `alert` y `alertSubject`.
+- `ops/prometheus/alerts.yml` tiene reglas equivalentes de referencia, para cuando las métricas se recojan con Prometheus.
+
+| `alert` | `alertSubject` | Qué significa | Qué hacer |
+|---|---|---|---|
+| `QUEUE_AGE` | `queue` | El mensaje elegible más viejo espera más de `QUEUE_AGE_ALERT_SECONDS` (300 s) | Mirar si hay workers vivos, el circuit breaker y `/actuator/health` |
+| `FAILED_RATE` | `all-tenants` | Más del 5 % de los mensajes de la última hora están `FAILED` (con al menos 20) | Agrupar por `failure_code` (docs/06 §4) |
+| `TENANT_PAUSED` | slug (o id) del tenant | Pausa automática: volumen, rebotes, quejas (FR-34) o dominio no verificado | Revisar con el producto; reanudar con `POST /admin/v1/tenants/{slug}/resume-sending` |
+| `CIRCUIT_BREAKER_OPEN` | `provider` | El proveedor lleva más de 10 minutos sin aceptar envíos | Estado de Resend; la cola espera sin perder intentos |
+| `PROVIDER_CONFIGURATION` | código de error de Resend | La API key o los permisos están mal (`401`, `403` de la key) | Rotar o corregir `RESEND_API_KEY` |
+| `LOST_LOCK` | `worker` | Un worker perdió el lock de un mensaje antes de cerrarlo | Revisar pausas largas del worker o `LOCK_TIMEOUT_SECONDS` |
+| `IDEMPOTENCY_CONFLICT` | id del mensaje | El proveedor vio el mismo id con otro cuerpo: render no determinista (AC-12.7) | Revisar la plantilla y la versión fijada del mensaje |
+| `COMPLAINT_RATE` | slug del tenant | Tasa de quejas a 7 días por encima de 0,1 % | Revisar contenido y destinatarios del producto antes de que llegue a pausar |
+| `AUTH_FAILURE_SPIKE` | IP | Una IP superó `AUTH_FAILURES_PER_MINUTE_PER_IP` fallos de autenticación | Si es un producto propio, su key está mal configurada; si no, posible fuerza bruta (docs/08 §4) |
+
+**Salud.**
+- `/actuator/health/liveness` y `/actuator/health/readiness` son las sondas del orquestador.
+- `/actuator/health` agrega además `queue` y `provider`. Este último solo existe en el rol worker.
+- `DEGRADED` responde `200`: avisa sin reiniciar instancias sanas. `provider` en `DOWN` (breaker abierto o error de configuración) sí responde `503` en `/actuator/health`, pero no afecta a las sondas.
+
+**Retención y borrado.**
+- Las purgas corren solas en el worker (docs/06 §8): variables, idempotencia, retención por tenant, contenido renderizado, huérfanos, contadores y auditoría.
+- Un titular se borra con `POST /admin/v1/data-subjects/erase`, siguiendo el procedimiento completo de docs/08 §6, que incluye pedir el borrado a Resend y responder en plazo.
 
 ## Plantillas como código
 

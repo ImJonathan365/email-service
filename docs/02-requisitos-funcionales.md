@@ -86,6 +86,9 @@ Reglas:
 - `opened` y `clicked` **no** son estados: se registran como eventos y como marcas de tiempo (`first_opened_at`, `first_clicked_at`).
 - Un evento que no hace avanzar el estado (llega tarde o desordenado) **se guarda igualmente** y **sus efectos secundarios se aplican igual** (p. ej., crear la supresión ante una queja). Cambiar el estado y crear la supresión son efectos independientes.
 - Un tenant suspendido o en pausa (FR-02, FR-34) **no** cambia el estado de sus mensajes: los `QUEUED` quedan retenidos.
+- **(rev. 2026-10-11, owner)** `QUEUED` y `SENDING` pertenecen al worker: un evento que llega antes de que el worker cierre el mensaje (por ejemplo, tras una respuesta perdida) se guarda **sin** cambiar el estado. El worker lo aplica justo después de su propio cierre a `SENT`, así que el *fencing* por `lock_token` no cambia. Ejemplo: llega `email.delivered` con el mensaje en `SENDING`; al cerrar, el mensaje queda `DELIVERED` con `delivered_at`.
+- **(rev. 2026-10-11, owner)** Si el worker cerró el mensaje en `FAILED` (p. ej. `RETRY_WINDOW_EXCEEDED`) y el proveedor informa que sí lo procesó (`sent`, `delivered`, `bounced`…), el estado **no** cambia. Se registra un WARN y la métrica `email_event_after_failure_total`, porque es el caso raro de "el proveedor sí lo envió".
+- **(rev. 2026-10-11)** Correlación de un evento: primero por la etiqueta `message_id` (nuestro UUID, presente aunque aún no exista `provider_message_id`), después por el id del proveedor (`data.email_id`). Si ambos existen y apuntan a mensajes distintos, el evento se guarda como huérfano con un WARN.
 
 ### 2.1 Mapeo de eventos del proveedor (Resend) (rev. 2026-10)
 
@@ -212,6 +215,9 @@ Requiere el ámbito `templates:write` (FR-33).
   - Alternativa configurable `SUPPRESSION_REJECT_MODE=reject` → `422 RECIPIENT_SUPPRESSED`.
 - **AC-10.2** — **(rev. 2026-10)** Alcance de la supresión (ADR-0012): `HARD_BOUNCE`, `COMPLAINT` y `PROVIDER` son **globales** (aplican a todos los tenants); `MANUAL` es **por tenant**. *Dado* una dirección suprimida globalmente por un rebote duro de un tenant A, *cuando* el tenant B envía a esa dirección, *entonces* también queda `FAILED`/`SUPPRESSED`.
 - **AC-10.3** — Un rebote duro (`email.bounced`) o una queja (`email.complained`) recibidos por webhook crean automáticamente la supresión, **aunque el evento no cambie el estado del mensaje** (§2).
+  - **(rev. 2026-10-11, owner)** El evento del proveedor no dice qué destinatario rebotó o se quejó. Si el mensaje tenía `cc` o `bcc`, **no** se suprime el `to`, porque podría ser la dirección principal del usuario. El estado del mensaje sí pasa a `BOUNCED`/`COMPLAINED`, porque es un hecho del mensaje.
+  - En ese caso la supresión llega con el `suppression.added` del proveedor, que nombra la dirección exacta: fila espejo `PROVIDER`, global.
+  - Sin copias, se suprime el `to`. Un evento huérfano suprime las direcciones que informa el proveedor (`data.to`).
 - **AC-10.4** — **(rev. 2026-10)** `email.delivery_delayed` (problema temporal) **no** suprime: solo registra el evento `DELIVERY_DELAYED`.
 - **AC-10.5** — La comprobación es insensible a mayúsculas/minúsculas en el dominio y en la parte local (decisión simple y explícita).
 - **AC-10.6** — **(rev. 2026-10)** El worker vuelve a comprobar la supresión justo antes de llamar al proveedor (AC-12.2), de modo que una supresión creada entre la aceptación y el envío también se respeta.
@@ -300,7 +306,7 @@ Requiere el ámbito `templates:write` (FR-33).
 ### FR-20 — Listado y filtrado de envíos (Should)
 
 - **AC-20.1** — **(rev. 2026-10)** `GET /v1/emails` admite los filtros `status`, `templateKey`, `to` (destinatario), `tag`, `createdAfter` y `createdBefore` (fechas), con paginación por cursor; por defecto, los 20 más recientes primero.
-- **AC-20.2** — **(rev. 2026-10)** Responde en ≤ 500 ms (p95) con el dataset de referencia: 4 tenants y 1 000 000 de filas por tenant, el 70 % del volumen total en uno de ellos.
+- **AC-20.2** — **(rev. 2026-10-12, owner)** Responde en ≤ 500 ms (p95) con el **dataset de referencia**: 4 tenants y 4 000 000 de mensajes en total, 2 800 000 (70 %) en uno de ellos y 400 000 en cada uno de los otros tres. Se mide con `./gradlew benchmarkOperations` a través de la API (autenticación y RLS incluidas); informe en `build/reports/operations-benchmark.txt`. La redacción anterior ("1 000 000 de filas por tenant, el 70 % en uno") era contradictoria.
 - **AC-20.3** — Solo devuelve mensajes del tenant autenticado (verificado por test de aislamiento y por RLS).
 
 ### FR-21 — Límites de tasa y cuotas por tenant (Must)
@@ -327,6 +333,8 @@ Requiere el ámbito `templates:write` (FR-33).
 - **AC-23.5** — **(rev. 2026-10)** `variables` se sustituye por `{}` (y se registra `variables_purged_at`) `VARIABLES_RETENTION_DAYS` (default 7) días después de que el mensaje llegue a un estado terminal o final por tiempo. Las variables marcadas `x-sensitive` en el esquema se eliminan **al pasar a `SENT`** o a un estado terminal.
 - **AC-23.6** — **(rev. 2026-10; solo aplica si FR-30 se activa)** El contenido de los adjuntos (`email_attachment.content`) se elimina en cuanto el mensaje llega a `SENT` o a un estado terminal; los metadatos (nombre, tipo, tamaño, hash) se conservan hasta la purga del mensaje.
 - **AC-23.7** — **(rev. 2026-10)** `rendered_*` se vacía a los 30 días. Los eventos huérfanos (`tenant_id` nulo) se purgan a los 30 días.
+- **AC-23.8** — **(rev. 2026-10-12, owner)** Las purgas nunca borran mensajes `QUEUED` ni `SENDING`.
+- **AC-23.9** — **(rev. 2026-10-12, propuesta pendiente de confirmar por el owner)** Para AC-23.5, `DELIVERED` cuenta como final por tiempo igual que `SENT` (`SENT_FINAL_AFTER_HOURS` desde `sent_at`). `DELIVERED` es estable, no terminal: sin esto, sus variables no se purgarían nunca.
 
 ### FR-24 — Observabilidad (Must)
 

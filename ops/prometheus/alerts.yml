@@ -1,0 +1,54 @@
+# Reference Prometheus rules for the NFR-11 alerts (owner, 2026-10-12). Not deployed in the MVP:
+# there the alerts are the structured ERROR log lines with the "alert" field (README, "Alertas").
+# Each rule here mirrors one value of that field, for when metrics are scraped (roadmap, phase 1).
+groups:
+  - name: email-service
+    rules:
+      - alert: QUEUE_AGE
+        expr: email_queue_oldest_seconds > 300
+        for: 1m
+        annotations:
+          summary: The oldest eligible message has waited more than QUEUE_AGE_ALERT_SECONDS.
+
+      - alert: FAILED_RATE
+        expr: |
+          sum(email_messages{status="FAILED"}) / sum(email_messages) > 0.05
+        for: 10m
+        annotations:
+          summary: More than 5 % of recent messages are FAILED (the log alert uses the last hour, from 20 messages).
+
+      - alert: TENANT_PAUSED
+        expr: increase(email_tenant_paused_total[10m]) > 0
+        annotations:
+          summary: A tenant was paused (FR-34 or an unverified sender domain).
+
+      - alert: CIRCUIT_BREAKER_OPEN
+        expr: email_circuit_breaker_open == 1
+        for: 10m
+        annotations:
+          summary: The provider circuit breaker has been open for more than 10 minutes.
+
+      - alert: LOST_LOCK
+        expr: increase(email_lost_lock_total[15m]) > 0
+        annotations:
+          summary: A worker lost a message lock before closing it.
+
+      - alert: IDEMPOTENCY_CONFLICT
+        expr: increase(email_provider_idempotency_conflict_total[15m]) > 0
+        annotations:
+          summary: The provider saw the same message id with a different body (AC-12.7).
+
+      - alert: COMPLAINT_RATE
+        expr: email_tenant_complaint_rate > 0.001
+        annotations:
+          summary: A tenant's complaint rate over 7 days is above 0.1 %.
+
+      - alert: PROVIDER_CONFIGURATION
+        expr: increase(email_provider_config_error_total[15m]) > 0
+        annotations:
+          summary: The provider rejected our own configuration (API key, permissions, endpoint).
+
+      - alert: AUTH_FAILURE_SPIKE
+        expr: increase(email_auth_ip_limited_total[15m]) > 0
+        annotations:
+          summary: An address went over AUTH_FAILURES_PER_MINUTE_PER_IP failed authentications.

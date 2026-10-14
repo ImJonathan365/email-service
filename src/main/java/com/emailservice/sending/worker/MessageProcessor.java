@@ -1,6 +1,7 @@
 package com.emailservice.sending.worker;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -16,17 +17,20 @@ import org.springframework.stereotype.Component;
 import com.emailservice.audit.Actor;
 import com.emailservice.audit.AuditAction;
 import com.emailservice.audit.AuditLog;
+import com.emailservice.common.alert.Alerts;
 import com.emailservice.common.config.AppProperties;
 import com.emailservice.common.config.RoleConditions.ConditionalOnWorkerRole;
+import com.emailservice.events.MessageEvents;
 import com.emailservice.provider.EmailSender;
 import com.emailservice.provider.OutboundEmail;
 import com.emailservice.provider.SendException;
 import com.emailservice.provider.SendResult;
-import com.emailservice.sending.SuppressionHashes;
+import com.emailservice.events.SuppressionHashes;
 import com.emailservice.templates.engine.TemplateEngine;
 import com.emailservice.templates.schema.SensitiveVariables;
 import com.emailservice.templates.schema.VariablesSchema;
 
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import tools.jackson.databind.JsonNode;
@@ -68,9 +72,27 @@ class MessageProcessor {
 
 	private final RetryPolicy retryPolicy;
 
+	private final MessageEvents messageEvents;
+
+	private final Alerts alerts;
+
+	private final ProviderOutcomes outcomes;
+
+	private final DistributionSummary attempts;
+
+	private final Clock clock;
+
 	MessageProcessor(QueueRepository queue, EmailSender sender, TemplateEngine engine, SuppressionHashes hashes,
 			JsonMapper jsonMapper, MeterRegistry meters, AuditLog auditLog, CircuitBreaker breaker,
-			ProviderRateLimiter rateLimiter, AppProperties properties) {
+			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, Alerts alerts, ProviderOutcomes outcomes,
+			Clock clock, AppProperties properties) {
+		this.clock = clock;
+		this.messageEvents = messageEvents;
+		this.alerts = alerts;
+		this.outcomes = outcomes;
+		this.attempts = DistributionSummary.builder("email.send.attempts")
+			.description("Attempts a message took until SENT or FAILED (AC-24.2)")
+			.register(meters);
 		this.queue = queue;
 		this.sender = sender;
 		this.engine = engine;
@@ -105,22 +127,25 @@ class MessageProcessor {
 				breaker.onInconclusive();
 			}
 			MDC.remove("messageId");
+			MDC.remove("tenantSlug");
 		}
 	}
 
 	/** Returns whether the provider was called, which is what the circuit breaker learns from. */
 	private boolean doProcess(QueueRepository.Claimed message) throws InterruptedException {
 		QueueRepository.SendContext context = queue.context(message.tenantId(), message.templateVersionId());
+		MDC.put("tenantSlug", context.tenantSlug());
 		VariablesSchema schema = VariablesSchema.parse(jsonMapper.readTree(context.variablesSchema()), "variablesSchema");
 		JsonNode variables = jsonMapper.readTree(message.variables());
 		String withoutSensitive = jsonMapper.writeValueAsString(SensitiveVariables.strip(schema, variables));
 
 		if (message.providerMessageId() != null) {
 			// The provider already accepted it: never call again (AC-13.6).
-			close(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive));
+			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null)
+				.isPresent());
 			return false;
 		}
-		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(Instant.now())) {
+		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(clock.instant())) {
 			fail(message, "RETRY_WINDOW_EXCEEDED", "The first attempt is older than 23 hours.", withoutSensitive);
 			return false;
 		}
@@ -146,6 +171,9 @@ class MessageProcessor {
 			return false;
 		}
 
+		QueueRepository.StoredContent stored = context.storeRenderedContent()
+				? storedCopy(context, schema, variables, message) : null;
+
 		OutboundEmail email = new OutboundEmail(message.id(),
 				new OutboundEmail.Address(message.fromEmail(), message.fromName()),
 				message.replyTo() == null ? null : new OutboundEmail.Address(message.replyTo(), null),
@@ -158,23 +186,40 @@ class MessageProcessor {
 			return false;
 		}
 		rateLimiter.acquire();
+		Timer.Sample call = Timer.start(meters);
 		try {
 			SendResult result = sender.send(email);
+			providerCall(call, ProviderOutcomes.Outcome.SUCCESS);
 			breaker.onSuccess();
-			boolean closed = queue.markSent(message, result.provider(), result.providerMessageId(), withoutSensitive);
-			if (closed) {
-				Timer.builder("email.time.to.sent")
-					.description("Acceptance to SENT (NFR-19)")
-					.tag("category", message.category())
-					.register(meters)
-					.record(Duration.between(message.createdAt(), Instant.now()));
-			}
-			close(message, closed);
+			Optional<Duration> acceptedToSent = queue.markSent(message, result.provider(), result.providerMessageId(),
+					withoutSensitive, stored);
+			// Both ends from the database clock: app/database skew must not bias a 5 s objective.
+			acceptedToSent.ifPresent(duration -> Timer.builder("email.time.to.sent")
+				.description("Acceptance to SENT (NFR-19)")
+				.tag("category", message.category())
+				.register(meters)
+				.record(duration));
+			sent(message, acceptedToSent.isPresent());
 		}
 		catch (SendException ex) {
+			providerCall(call, switch (ex.kind()) {
+				case TRANSIENT -> ProviderOutcomes.Outcome.TRANSIENT;
+				case CONFIGURATION -> ProviderOutcomes.Outcome.CONFIGURATION;
+				case PERMANENT, TENANT_CONFIGURATION -> ProviderOutcomes.Outcome.PERMANENT;
+			});
 			onSendFailure(message, ex, withoutSensitive);
 		}
 		return true;
+	}
+
+	/** Provider latency by outcome (AC-24.2) and the last five minutes for its health indicator. */
+	private void providerCall(Timer.Sample call, ProviderOutcomes.Outcome outcome) {
+		call.stop(Timer.builder("email.provider.latency")
+			.description("Duration of a provider call")
+			.tag("provider", sender.name())
+			.tag("outcome", outcome.name())
+			.register(meters));
+		outcomes.record(outcome);
 	}
 
 	private void onSendFailure(QueueRepository.Claimed message, SendException ex, String withoutSensitive) {
@@ -184,8 +229,9 @@ class MessageProcessor {
 				// broken setup burn attempts (docs/05 §4, "Configuración").
 				breaker.onConfigurationError();
 				configurationError(ex.providerError());
-				log.error("The provider rejected our own configuration ({}); check RESEND_API_KEY and RESEND_API_URL. "
-						+ "Sending is paused by the circuit breaker", ex.providerError());
+				alerts.raise("PROVIDER_CONFIGURATION", String.valueOf(ex.providerError()), "The provider rejected our own "
+						+ "configuration (" + ex.providerError() + "); check RESEND_API_KEY and RESEND_API_URL. "
+						+ "Sending is paused by the circuit breaker");
 				close(message, queue.release(message, ex.code()));
 			}
 			case TENANT_CONFIGURATION -> {
@@ -199,7 +245,8 @@ class MessageProcessor {
 				if ("PROVIDER_IDEMPOTENCY_CONFLICT".equals(ex.code())) {
 					// Same key, different body: the render was not deterministic (AC-13.8).
 					meters.counter("email.provider.idempotency.conflict").increment();
-					log.error("Provider idempotency conflict: the same message produced a different body (AC-12.7)");
+					alerts.raise("IDEMPOTENCY_CONFLICT", message.id().toString(),
+							"Provider idempotency conflict: the same message produced a different body (AC-12.7)");
 				}
 				fail(message, ex.code(), ex.getMessage(), withoutSensitive);
 			}
@@ -210,12 +257,31 @@ class MessageProcessor {
 		}
 	}
 
+	/**
+	 * The copy a tenant with storeRenderedContent keeps (AC-19.3): rendered a second time with the
+	 * sensitive values as [REDACTED], so the stored content never holds them. If that render fails
+	 * (e.g. a helper cannot format the marker), nothing is stored; the send itself is unaffected.
+	 */
+	private QueueRepository.StoredContent storedCopy(QueueRepository.SendContext context, VariablesSchema schema,
+			JsonNode variables, QueueRepository.Claimed message) {
+		try {
+			TemplateEngine.Rendered redacted = engine.render(
+					new TemplateEngine.Sources(context.subjectTemplate(), context.htmlTemplate(), context.textTemplate()),
+					SensitiveVariables.redact(schema, variables), message.locale(), ZoneId.of(context.timezone()));
+			return new QueueRepository.StoredContent(redacted.subject(), redacted.html(), redacted.text());
+		}
+		catch (TemplateEngine.RenderException ex) {
+			log.warn("Rendered content not stored: the redacted copy does not render");
+			return null;
+		}
+	}
+
 	private void retryOrFail(QueueRepository.Claimed message, SendException ex, String withoutSensitive) {
 		if (retryPolicy.exhausted(message.attempts())) {
 			fail(message, "MAX_ATTEMPTS_EXCEEDED", "Last error: " + ex.code(), withoutSensitive);
 			return;
 		}
-		Instant next = Instant.now().plus(retryPolicy.delayAfter(message.attempts(), ex.retryAfter()));
+		Instant next = clock.instant().plus(retryPolicy.delayAfter(message.attempts(), ex.retryAfter()));
 		if (message.firstAttemptAt() != null && next.isAfter(message.firstAttemptAt().plus(RETRY_WINDOW))) {
 			fail(message, "RETRY_WINDOW_EXCEEDED", "Last error: " + ex.code(), withoutSensitive);
 			return;
@@ -228,8 +294,8 @@ class MessageProcessor {
 			auditLog.record(queue.jdbc(), WORKER, AuditAction.TENANT_PAUSED, message.tenantId(), "tenant",
 					message.tenantId().toString(), Map.of("reason", "PROVIDER_DOMAIN"));
 			configurationError("domain_not_verified");
-			log.error("The provider reports the tenant's sender domain as unverified; the tenant is paused "
-					+ "(PROVIDER_DOMAIN) until it is resumed through the admin API");
+			alerts.raise("TENANT_PAUSED", message.tenantId().toString(), "The provider reports the tenant's sender "
+					+ "domain as unverified; the tenant is paused (PROVIDER_DOMAIN) until it is resumed through the admin API");
 		}
 	}
 
@@ -238,7 +304,21 @@ class MessageProcessor {
 	}
 
 	private void fail(QueueRepository.Claimed message, String code, String detail, String withoutSensitive) {
-		close(message, queue.markFailed(message, code, detail, withoutSensitive));
+		boolean closed = queue.markFailed(message, code, detail, withoutSensitive);
+		close(message, closed);
+		if (closed) {
+			attempts.record(message.attempts());
+			messageEvents.checkAfterFailed(message.tenantId(), message.id(), code);
+		}
+	}
+
+	/** Events that arrived while this worker owned the message apply now, after its own close. */
+	private void sent(QueueRepository.Claimed message, boolean closed) {
+		close(message, closed);
+		if (closed) {
+			attempts.record(message.attempts());
+			messageEvents.applyStoredAfterSent(message.tenantId(), message.id());
+		}
 	}
 
 	/** A close that changed no row means another worker owns the message now: only record it. */
@@ -246,7 +326,8 @@ class MessageProcessor {
 		if (!closed) {
 			queue.logLostLock(message);
 			meters.counter("email.lost.lock").increment();
-			log.warn("Lost the lock of a message before closing it; leaving it to its new owner");
+			alerts.raise("LOST_LOCK", "worker",
+					"Lost the lock of a message before closing it; leaving it to its new owner");
 		}
 	}
 
