@@ -11,6 +11,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -63,9 +65,11 @@ class ResendWorkerTest extends WorkerTest {
 	void setUp() throws Exception {
 		RESEND.resetAll();
 		ResendEmailSender resend = new ResendEmailSender(RESEND.baseUrl(), "re_test_key", Duration.ofSeconds(2),
-				Duration.ofSeconds(2), jsonMapper);
+				Duration.ofSeconds(2), jsonMapper, clock);
 		sender.behave(resend::send);
 		a = new SendingTestSupport(http(), "SECURITY");
+		// The breaker's 60 s must not depend on how long the test takes: time moves only when advanced.
+		clock.fixAt(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 	}
 
 	/** The breaker and the clock are shared with every other test: leave them as found. */

@@ -1,6 +1,6 @@
 package com.emailservice.events;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -56,8 +56,11 @@ class WebhookController {
 
 	private final MeterRegistry meters;
 
+	private final Clock clock;
+
 	WebhookController(List<WebhookVerifier> verifiers, EventIngestion ingestion, WebhookRejections rejections,
-			ClientIpResolver clientIpResolver, JsonMapper jsonMapper, MeterRegistry meters) {
+			ClientIpResolver clientIpResolver, JsonMapper jsonMapper, MeterRegistry meters, Clock clock) {
+		this.clock = clock;
 		this.verifiers = verifiers.stream()
 			.collect(Collectors.toUnmodifiableMap(WebhookVerifier::provider, Function.identity()));
 		this.ingestion = ingestion;
@@ -95,7 +98,7 @@ class WebhookController {
 
 		ResendEvent event;
 		try {
-			event = ResendEvent.parse(jsonMapper, raw, Instant.now());
+			event = ResendEvent.parse(jsonMapper, raw, clock.instant());
 		}
 		catch (ResendEvent.Unreadable ex) {
 			meters.counter("email.webhook.rejected", "reason", "unreadable").increment();

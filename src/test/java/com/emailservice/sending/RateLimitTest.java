@@ -7,42 +7,49 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Duration;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.emailservice.support.AuditRows;
 import com.emailservice.support.IntegrationTest;
+import com.emailservice.support.MutableClock;
 import com.emailservice.support.PostgresTestDatabase;
 import com.emailservice.support.PostgresTestDatabase.Role;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
-/** FR-21: per-tenant rate limit and daily quota, shared through PostgreSQL. */
+/**
+ * FR-21: per-tenant rate limit and daily quota, shared through PostgreSQL. The windows come from
+ * the application clock, which every test pins thirty seconds into a minute and restores after:
+ * no test depends on when it runs, and a window only changes when a test moves the clock.
+ */
 class RateLimitTest extends IntegrationTest {
+
+	static final Instant START = Instant.parse("2031-03-04T10:20:30Z");
 
 	@Autowired
 	MeterRegistry meters;
+
+	@Autowired
+	MutableClock clock;
 
 	SendingTestSupport a;
 
 	@BeforeEach
 	void setUp() throws Exception {
 		a = new SendingTestSupport(http(), "SECURITY");
-		awayFromTheEndOfAMinute();
+		clock.fixAt(START);
 	}
 
-	/** Minute windows are real ones: never start a test in the last seconds of a minute. */
-	static void awayFromTheEndOfAMinute() throws InterruptedException {
-		int second = LocalTime.now().getSecond();
-		if (second >= 50) {
-			Thread.sleep((61 - second) * 1000L);
-		}
+	@AfterEach
+	void restoreClock() {
+		clock.reset();
 	}
 
 	void limits(String body) throws Exception {
@@ -77,10 +84,21 @@ class RateLimitTest extends IntegrationTest {
 
 		assertThat(limited.statusCode()).isEqualTo(429);
 		assertThat(limited.body()).contains("RATE_LIMITED");
-		long retryAfter = Long.parseLong(limited.headers().firstValue("Retry-After").orElseThrow());
-		assertThat(retryAfter).isBetween(1L, 60L);
+		assertThat(limited.headers().firstValue("Retry-After")).as("until 10:21:00").contains("30");
 		assertThat(counter(a.tenant.id(), "MINUTE")).as("the rejected request rolled back").isEqualTo(3);
 		assertThat(SendingTestSupport.countMessages(a.tenant.id())).isEqualTo(3);
+	}
+
+	@Test
+	void ac_21_1_theNextMinuteIsANewWindow() throws Exception {
+		limits("{\"rateLimitPerMinute\": 1}");
+		assertThat(send().statusCode()).isEqualTo(202);
+		clock.advance(Duration.ofSeconds(29));
+		assertThat(send().statusCode()).as("10:20:59, same window").isEqualTo(429);
+
+		clock.advance(Duration.ofSeconds(1));
+
+		assertThat(send().statusCode()).as("10:21:00, next window").isEqualTo(202);
 	}
 
 	@Test
@@ -130,9 +148,10 @@ class RateLimitTest extends IntegrationTest {
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
 				PreparedStatement statement = system.prepareStatement("""
 						INSERT INTO rate_limit_counter (tenant_id, window_kind, window_start, count)
-						VALUES (?, 'MINUTE', date_trunc('minute', now()), 5)
+						VALUES (?, 'MINUTE', ?, 5)
 						""")) {
 			statement.setObject(1, a.tenant.id());
+			statement.setObject(2, OffsetDateTime.parse("2031-03-04T10:20:00Z"));
 			statement.executeUpdate();
 		}
 
@@ -141,16 +160,16 @@ class RateLimitTest extends IntegrationTest {
 
 	@Test
 	void ac_21_1_theDailyQuotaFollowsTheTenantsCalendar() throws Exception {
-		ZoneId zone = ZoneId.of("Pacific/Kiritimati");
+		// UTC+14: 10:20:30 UTC is 00:20:30 of 5 March for the tenant, whose day began at 10:00 UTC.
 		limits("{\"dailyQuota\": 2, \"timezone\": \"Pacific/Kiritimati\"}");
-		// A full counter of the tenant's previous day does not count today.
+		// A full counter of the tenant's previous day (4 March) does not count today.
 		try (Connection system = PostgresTestDatabase.connect(Role.SYSTEM);
 				PreparedStatement statement = system.prepareStatement("""
 						INSERT INTO rate_limit_counter (tenant_id, window_kind, window_start, count)
-						VALUES (?, 'DAY', (date_trunc('day', now() AT TIME ZONE 'Pacific/Kiritimati') - interval '1 day')
-						        AT TIME ZONE 'Pacific/Kiritimati', 1000)
+						VALUES (?, 'DAY', ?, 1000)
 						""")) {
 			statement.setObject(1, a.tenant.id());
+			statement.setObject(2, OffsetDateTime.parse("2031-03-03T10:00:00Z"));
 			statement.executeUpdate();
 		}
 		assertThat(send().statusCode()).isEqualTo(202);
@@ -159,10 +178,8 @@ class RateLimitTest extends IntegrationTest {
 		HttpResponse<String> limited = send();
 
 		assertThat(limited.statusCode()).isEqualTo(429);
-		ZonedDateTime now = ZonedDateTime.now(zone);
-		long untilMidnight = Duration.between(now, now.toLocalDate().plusDays(1).atStartOfDay(zone)).toSeconds();
-		long retryAfter = Long.parseLong(limited.headers().firstValue("Retry-After").orElseThrow());
-		assertThat(retryAfter).isBetween(untilMidnight - 5, untilMidnight + 5);
+		// Until the tenant's midnight, 6 March 00:00 local = 5 March 10:00 UTC: 23 h 39 min 30 s.
+		assertThat(limited.headers().firstValue("Retry-After")).contains(String.valueOf(23 * 3600 + 39 * 60 + 30));
 		assertThat(limited.body()).contains("daily quota");
 	}
 

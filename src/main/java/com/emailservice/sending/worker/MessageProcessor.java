@@ -1,6 +1,7 @@
 package com.emailservice.sending.worker;
 
 import java.security.SecureRandom;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -79,10 +80,13 @@ class MessageProcessor {
 
 	private final DistributionSummary attempts;
 
+	private final Clock clock;
+
 	MessageProcessor(QueueRepository queue, EmailSender sender, TemplateEngine engine, SuppressionHashes hashes,
 			JsonMapper jsonMapper, MeterRegistry meters, AuditLog auditLog, CircuitBreaker breaker,
 			ProviderRateLimiter rateLimiter, MessageEvents messageEvents, Alerts alerts, ProviderOutcomes outcomes,
-			AppProperties properties) {
+			Clock clock, AppProperties properties) {
+		this.clock = clock;
 		this.messageEvents = messageEvents;
 		this.alerts = alerts;
 		this.outcomes = outcomes;
@@ -137,10 +141,11 @@ class MessageProcessor {
 
 		if (message.providerMessageId() != null) {
 			// The provider already accepted it: never call again (AC-13.6).
-			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null));
+			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null)
+				.isPresent());
 			return false;
 		}
-		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(Instant.now())) {
+		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(clock.instant())) {
 			fail(message, "RETRY_WINDOW_EXCEEDED", "The first attempt is older than 23 hours.", withoutSensitive);
 			return false;
 		}
@@ -186,16 +191,15 @@ class MessageProcessor {
 			SendResult result = sender.send(email);
 			providerCall(call, ProviderOutcomes.Outcome.SUCCESS);
 			breaker.onSuccess();
-			boolean closed = queue.markSent(message, result.provider(), result.providerMessageId(), withoutSensitive,
-					stored);
-			if (closed) {
-				Timer.builder("email.time.to.sent")
-					.description("Acceptance to SENT (NFR-19)")
-					.tag("category", message.category())
-					.register(meters)
-					.record(Duration.between(message.createdAt(), Instant.now()));
-			}
-			sent(message, closed);
+			Optional<Duration> acceptedToSent = queue.markSent(message, result.provider(), result.providerMessageId(),
+					withoutSensitive, stored);
+			// Both ends from the database clock: app/database skew must not bias a 5 s objective.
+			acceptedToSent.ifPresent(duration -> Timer.builder("email.time.to.sent")
+				.description("Acceptance to SENT (NFR-19)")
+				.tag("category", message.category())
+				.register(meters)
+				.record(duration));
+			sent(message, acceptedToSent.isPresent());
 		}
 		catch (SendException ex) {
 			providerCall(call, switch (ex.kind()) {
@@ -277,7 +281,7 @@ class MessageProcessor {
 			fail(message, "MAX_ATTEMPTS_EXCEEDED", "Last error: " + ex.code(), withoutSensitive);
 			return;
 		}
-		Instant next = Instant.now().plus(retryPolicy.delayAfter(message.attempts(), ex.retryAfter()));
+		Instant next = clock.instant().plus(retryPolicy.delayAfter(message.attempts(), ex.retryAfter()));
 		if (message.firstAttemptAt() != null && next.isAfter(message.firstAttemptAt().plus(RETRY_WINDOW))) {
 			fail(message, "RETRY_WINDOW_EXCEEDED", "Last error: " + ex.code(), withoutSensitive);
 			return;

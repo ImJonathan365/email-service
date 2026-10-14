@@ -3,6 +3,7 @@ package com.emailservice.sending.worker;
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -141,9 +142,10 @@ class QueueRepository {
 	/**
 	 * SENT, fenced. Sensitive variables go in the same statement (AC-23.5); finalized_at stays
 	 * null because SENT is not terminal. {@code stored} is null unless the tenant keeps rendered
-	 * content. Returns false when the lock was lost.
+	 * content. Returns the time from acceptance to SENT, both read from the database clock (NFR-19),
+	 * or empty when the lock was lost.
 	 */
-	boolean markSent(Claimed message, String provider, String providerMessageId, String variables,
+	Optional<Duration> markSent(Claimed message, String provider, String providerMessageId, String variables,
 			StoredContent stored) {
 		return jdbc.sql("""
 				UPDATE email_message
@@ -154,6 +156,7 @@ class QueueRepository {
 				    rendered_html = coalesce(:renderedHtml, rendered_html),
 				    rendered_text = coalesce(:renderedText, rendered_text)
 				WHERE id = :id AND status = 'SENDING' AND lock_token = :token
+				RETURNING (extract(epoch FROM sent_at - created_at) * 1000)::bigint AS millis
 				""")
 			.param("provider", provider)
 			.param("providerMessageId", providerMessageId)
@@ -163,7 +166,8 @@ class QueueRepository {
 			.param("renderedText", stored == null ? null : stored.text())
 			.param("id", message.id())
 			.param("token", message.lockToken())
-			.update() == 1;
+			.query((rs, row) -> Duration.ofMillis(rs.getLong("millis")))
+			.optional();
 	}
 
 	/** Terminal FAILED, fenced, with sensitive variables removed and finalized_at set. */

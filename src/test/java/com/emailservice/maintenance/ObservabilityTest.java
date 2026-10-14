@@ -3,9 +3,7 @@ package com.emailservice.maintenance;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,29 +12,41 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.emailservice.common.alert.Alerts;
+import com.emailservice.common.config.AppProperties;
+import com.emailservice.common.persistence.SystemDataSource;
 import com.emailservice.sending.SendingTestSupport;
 import com.emailservice.support.IntegrationTest;
 import com.emailservice.support.MessageSeeder;
 import com.emailservice.support.MutableClock;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import tools.jackson.databind.JsonNode;
 
-/** AC-24.2 and AC-24.4, NFR-11: the queue indicator, the queue gauges and the queue alerts. */
+/**
+ * AC-24.2 and AC-24.4, NFR-11: the queue indicator, the queue gauges and the queue alerts. Each
+ * test builds its own metrics task with its own alerts and meter registry, so no alert
+ * deduplication or gauge state is shared with other tests.
+ */
 @ExtendWith(OutputCaptureExtension.class)
 class ObservabilityTest extends IntegrationTest {
 
-	static final AtomicInteger ROUNDS = new AtomicInteger();
+	@Autowired
+	@SystemDataSource
+	JdbcClient systemJdbc;
 
 	@Autowired
+	QueueState queue;
+
+	@Autowired
+	AppProperties properties;
+
 	OperationalMetrics metrics;
 
-	@Autowired
 	MeterRegistry meters;
-
-	@Autowired
-	MutableClock clock;
 
 	SendingTestSupport a;
 
@@ -44,15 +54,13 @@ class ObservabilityTest extends IntegrationTest {
 	void setUp() throws Exception {
 		a = new SendingTestSupport(http(), "SECURITY");
 		cancelPending();
-		// Each test starts further ahead than the previous one: past the deduplication of any alert
-		// raised before, here or in another class.
-		clock.advance(Duration.ofMinutes(16L * ROUNDS.incrementAndGet()));
+		meters = new SimpleMeterRegistry();
+		metrics = new OperationalMetrics(systemJdbc, queue, new Alerts(new MutableClock()), meters, properties);
 	}
 
 	@AfterEach
 	void tearDown() throws Exception {
 		cancelPending();
-		clock.reset();
 	}
 
 	static void cancelPending() throws Exception {

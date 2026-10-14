@@ -1,6 +1,10 @@
 package com.emailservice.sending;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -15,6 +19,8 @@ import io.micrometer.core.instrument.MeterRegistry;
  * them (AC-21.2). Called after every validation and inside the transaction of the INSERT: the
  * 429 rolls the increment back, so a rejected or failed request never consumes quota and the
  * counter commits only with its message (AC-21.5). Idempotent repeats never reach it (AC-08.7).
+ * The windows come from the application Clock, like every other time decision; instances agree
+ * on the minute as long as their clocks are synchronized (NTP).
  */
 @Component
 class AcceptanceRateLimiter {
@@ -25,10 +31,13 @@ class AcceptanceRateLimiter {
 
 	private final MeterRegistry meters;
 
-	AcceptanceRateLimiter(JdbcClient jdbc, RateLimitAudit audit, MeterRegistry meters) {
+	private final Clock clock;
+
+	AcceptanceRateLimiter(JdbcClient jdbc, RateLimitAudit audit, MeterRegistry meters, Clock clock) {
 		this.jdbc = jdbc;
 		this.audit = audit;
 		this.meters = meters;
+		this.clock = clock;
 	}
 
 	private record Limits(String slug, int perMinute, int dailyQuota, String timezone) {
@@ -45,28 +54,32 @@ class AcceptanceRateLimiter {
 					rs.getInt("daily_quota"), rs.getString("timezone")))
 			.single();
 
-		Window minute = increment(tenantId, "MINUTE", "date_trunc('minute', now())", "interval '1 minute'", null);
+		Instant now = clock.instant();
+		Window minute = increment(tenantId, "MINUTE", now,
+				"date_trunc('minute', :now AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'", "interval '1 minute'", null);
 		if (minute.count() > limits.perMinute()) {
 			throw reject(tenantId, limits, "MINUTE", limits.perMinute(), minute);
 		}
 		// The day follows the tenant's calendar, not UTC.
-		Window day = increment(tenantId, "DAY", "date_trunc('day', now() AT TIME ZONE :tz) AT TIME ZONE :tz",
+		Window day = increment(tenantId, "DAY", now, "date_trunc('day', :now AT TIME ZONE :tz) AT TIME ZONE :tz",
 				"interval '1 day'", limits.timezone());
 		if (day.count() > limits.dailyQuota()) {
 			throw reject(tenantId, limits, "DAY", limits.dailyQuota(), day);
 		}
 	}
 
-	private Window increment(UUID tenantId, String kind, String windowStart, String length, String timezone) {
+	private Window increment(UUID tenantId, String kind, Instant now, String windowStart, String length,
+			String timezone) {
 		var statement = jdbc.sql("""
 				INSERT INTO rate_limit_counter (tenant_id, window_kind, window_start, count)
 				VALUES (:tenantId, :kind, %s, 1)
 				ON CONFLICT (tenant_id, window_kind, window_start)
 				    DO UPDATE SET count = rate_limit_counter.count + 1
-				RETURNING count, extract(epoch FROM window_start + %s - now()) AS seconds_left
+				RETURNING count, extract(epoch FROM window_start + %s - :now) AS seconds_left
 				""".formatted(windowStart, length))
 			.param("tenantId", tenantId)
-			.param("kind", kind);
+			.param("kind", kind)
+			.param("now", OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
 		if (timezone != null) {
 			statement = statement.param("tz", timezone);
 		}
@@ -75,7 +88,7 @@ class AcceptanceRateLimiter {
 
 	private ApiException reject(UUID tenantId, Limits limits, String window, int limit, Window state) {
 		meters.counter("email.rate.limited", "tenant", limits.slug(), "window", window).increment();
-		audit.recordOncePerHour(tenantId, window, limit);
+		audit.recordOncePerHour(tenantId, window, limit, clock.instant());
 		String detail = "MINUTE".equals(window) ? "The tenant's rate limit of " + limit + " emails per minute was reached."
 				: "The tenant's daily quota of " + limit + " emails was reached.";
 		return ApiException.rateLimited(detail, Duration.ofMillis((long) (state.secondsLeft() * 1000)));

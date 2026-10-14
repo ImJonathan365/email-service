@@ -94,10 +94,14 @@ class SvixWebhookVerifierTest {
 	@Test
 	void ac_16_3_signaturesOutsideFiveMinutesEitherWayAreRejected() throws Exception {
 		Map<String, String> headers = headers(ID, TIMESTAMP, SIGNATURE);
+		// Signed 300 s / 301 s in the past: our clock is ahead of the signature.
 		assertThat(verify(verifier(Instant.ofEpochSecond(TIMESTAMP + 300), SVIX_EXAMPLE_SECRET), headers, BODY))
 			.isNotNull();
 		assertThat(rejection(verifier(Instant.ofEpochSecond(TIMESTAMP + 301), SVIX_EXAMPLE_SECRET), headers, BODY))
 			.isEqualTo(Reason.OUTSIDE_TOLERANCE);
+		// Signed 300 s / 301 s in the future: our clock is behind the signature.
+		assertThat(verify(verifier(Instant.ofEpochSecond(TIMESTAMP - 300), SVIX_EXAMPLE_SECRET), headers, BODY))
+			.isNotNull();
 		assertThat(rejection(verifier(Instant.ofEpochSecond(TIMESTAMP - 301), SVIX_EXAMPLE_SECRET), headers, BODY))
 			.isEqualTo(Reason.OUTSIDE_TOLERANCE);
 	}
