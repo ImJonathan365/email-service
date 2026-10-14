@@ -59,7 +59,10 @@ choose the most conservative option and leave `// TODO(owner-decision): …` lis
   It starts from `dev` and is merged back into `dev` when build and tests are green.
 - `dev` goes to `main` only when the owner says so (milestone close or release).
 - Changes that do not affect the system (comments, docs, typos, AGENTS.md) may go directly to `dev` or `main`.
-- Push `dev` and `feat/*` so CI runs. Never push to `main`, never force push.
+- Push `dev`, `feat/*` and `fix/*` so CI runs. Never push to `main`, never force push.
+- Before waiting for a CI run, check that the workflow actually triggers for that branch.
+- After each merge of `dev` into `main`, an annotated tag `vX.Y.0-hN` marks it (Y = milestone N);
+  the agent creates and pushes it once the owner confirms the merge.
 
 ## Commands
 
