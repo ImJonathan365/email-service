@@ -141,7 +141,8 @@ class MessageProcessor {
 
 		if (message.providerMessageId() != null) {
 			// The provider already accepted it: never call again (AC-13.6).
-			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null));
+			sent(message, queue.markSent(message, sender.name(), message.providerMessageId(), withoutSensitive, null)
+				.isPresent());
 			return false;
 		}
 		if (message.firstAttemptAt() != null && message.firstAttemptAt().plus(RETRY_WINDOW).isBefore(clock.instant())) {
@@ -190,16 +191,15 @@ class MessageProcessor {
 			SendResult result = sender.send(email);
 			providerCall(call, ProviderOutcomes.Outcome.SUCCESS);
 			breaker.onSuccess();
-			boolean closed = queue.markSent(message, result.provider(), result.providerMessageId(), withoutSensitive,
-					stored);
-			if (closed) {
-				Timer.builder("email.time.to.sent")
-					.description("Acceptance to SENT (NFR-19)")
-					.tag("category", message.category())
-					.register(meters)
-					.record(Duration.between(message.createdAt(), clock.instant()));
-			}
-			sent(message, closed);
+			Optional<Duration> acceptedToSent = queue.markSent(message, result.provider(), result.providerMessageId(),
+					withoutSensitive, stored);
+			// Both ends from the database clock: app/database skew must not bias a 5 s objective.
+			acceptedToSent.ifPresent(duration -> Timer.builder("email.time.to.sent")
+				.description("Acceptance to SENT (NFR-19)")
+				.tag("category", message.category())
+				.register(meters)
+				.record(duration));
+			sent(message, acceptedToSent.isPresent());
 		}
 		catch (SendException ex) {
 			providerCall(call, switch (ex.kind()) {

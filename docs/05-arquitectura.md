@@ -187,7 +187,7 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 **(rev. 2026-10-12) Comportamiento implementado en H7, parte 2:**
 - **Rate limit y cuota** (FR-21):
   - el contador `rate_limit_counter` se incrementa en la transacción del `INSERT`, después de las validaciones;
-  - la ventana `MINUTE` es UTC y la `DAY` sigue el calendario del tenant (`timezone`). **(rev. 2026-10-13)** Ambas se calculan con el `Clock` de la aplicación, no con `now()` de PostgreSQL; las instancias coinciden en el minuto mientras sus relojes estén sincronizados (NTP);
+  - la ventana `MINUTE` es UTC y la `DAY` sigue el calendario del tenant (`timezone`). **(rev. 2026-10-13)** Ambas se calculan con el `Clock` de la aplicación (ver "Fuente de la hora");
   - al superarse, `429 RATE_LIMITED` con `Retry-After` hasta el fin de la ventana; el rollback deshace el incremento, así que el rechazo no consume cuota;
   - los límites se leen en cada petición, así que un `PATCH` aplica sin redesplegar;
   - auditoría agregada: una fila `TENANT_RATE_LIMITED` por tenant, ventana y hora (owner), en su propia transacción;
@@ -217,16 +217,32 @@ Backoff: `1 min → 5 min → 15 min → 1 h → 6 h` con jitter ±20 %; `MAX_AT
 - **Alertas** (README, "Alertas"): `QUEUE_AGE`, `FAILED_RATE`, `TENANT_PAUSED`, `CIRCUIT_BREAKER_OPEN`, `LOST_LOCK`, `IDEMPOTENCY_CONFLICT`, `COMPLAINT_RATE`, `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`.
 - **Logs (AC-24.3):** el worker y los webhooks añaden `tenantSlug` y `messageId` al MDC. `EmailAddresses.masked` es la única forma admitida de mostrar una dirección; hoy ninguna línea de log la necesita.
 
-**(rev. 2026-10-13) Fuente de la hora.** Toda decisión de la aplicación que depende de la hora usa el bean `Clock`, nunca `Instant.now()` ni la hora del sistema:
-- **Envío y webhooks:** ventana de 23 h, próximo intento, `Retry-After` con fecha HTTP y hora de respaldo de un webhook.
-- **Protección:** ventanas del rate limit y su auditoría horaria, ventanas de `401` por IP, refresco de prefijos de keys y circuit breaker.
-- **Observabilidad:** deduplicación de alertas.
+**(rev. 2026-10-13) Fuente de la hora: el `Clock` de la aplicación o `now()` de PostgreSQL.**
 
-Quedan fuera dos usos legítimos:
-- `System.nanoTime` como reloj monótono (limitador de llamadas al proveedor, ya inyectable, y el intervalo del bucle del worker);
+Regla: una decisión usa una sola fuente en sus dos extremos. Si compara con columnas escritas por la base de datos, la decisión se toma en SQL con `now()`. Si su estado vive en memoria o lo escribe la aplicación, usa el bean `Clock`, que los tests pueden fijar.
+
+| Fuente | Decisiones | Por qué |
+|---|---|---|
+| `now()` de PostgreSQL | Toma de la cola (`next_attempt_at <= now()`), locks y barrido, `first_attempt_at`, `sent_at`, `finalized_at`, purgas, anomalías, métricas de cola y tiempo aceptación → `SENT` (NFR-19), expiración de API keys | Los datos y el corte se miden con el mismo reloj, en la misma sentencia |
+| `Clock` de la aplicación | Circuit breaker, `401` por IP, refresco de prefijos, deduplicación de alertas, ventanas del rate limit y su auditoría horaria, `Retry-After`, ventana de firma de webhooks, ventana de 23 h y próximo intento del worker | Estado en memoria o calculado por la aplicación; los tests lo fijan y lo avanzan sin depender de cuándo corren |
+
+**Puntos donde se encuentran las dos fuentes**, con un desfase de *s* segundos entre la aplicación y PostgreSQL:
+
+1. **Ventana de 23 h** (`first_attempt_at` lo escribe PostgreSQL y el worker lo compara con el `Clock`). La ventana efectiva queda en 23 h ± *s*. El límite que importa es el de idempotencia de Resend, 24 h desde el primer intento: queda 1 h de margen menos la duración de un intento (≤ `LOCK_TIMEOUT_SECONDS`, 60 s), así que es seguro mientras *s* < ~59 min. Con NTP, *s* es de milisegundos. La validación de arranque (AC-13.7) ya exige que backoff × 1,2 + intentos × lock < 23 h.
+2. **Próximo intento** (`next_attempt_at` lo escribe la aplicación y la toma de la cola lo compara con `now()`). El reintento se adelanta o retrasa *s*. El backoff mínimo es de 60 s ±20 %, y un `Retry-After` adelantado unos segundos solo produce otro `429` transitorio. Seguro.
+3. **Ventanas del rate limit** (`window_start` lo escribe la aplicación y la purga de contadores usa `now()` con un margen de 2 días). Seguro.
+4. **Hora de respaldo de un webhook sin `created_at`** (guardada en `occurred_at` junto a `received_at` de la BD). Solo afecta al orden de eventos que el proveedor no fechó. Seguro.
+5. **Corregido aquí:** el tiempo aceptación → `SENT` restaba `created_at` de la BD a la hora de la aplicación, y unos segundos de desfase sesgaban un objetivo de 5 s (NFR-19). Ahora `markSent` lo devuelve calculado en SQL (`sent_at - created_at`).
+
+**Rate limit con varias instancias de la API.** Pasó de `now()` de PostgreSQL al `Clock`:
+- **Por qué:** para que todas las decisiones de la aplicación usen una misma fuente que los tests pueden fijar. Antes los tests dependían del segundo del minuto real y usaban `sleep`.
+- **Qué no cambia:** el contador sigue siendo una sola fila por tenant, ventana y periodo en PostgreSQL, compartida por todas las instancias (AC-21.2).
+- **Qué cambia:** cada instancia elige la ventana con su reloj. Con un desfase de *s* entre instancias, solo las peticiones de los *s* segundos alrededor del cambio de minuto pueden contarse en la ventana vecina. Las ventanas fijas ya permiten hasta 2 × límite en 60 s seguidos que crucen el cambio de minuto, así que este efecto no cambia la garantía.
+- **Requisito:** las instancias deben tener la hora sincronizada (NTP), como ya exige la validación de firmas de webhooks (±5 min).
+
+Quedan fuera de la regla:
+- `System.nanoTime` como reloj monótono: el limitador de llamadas al proveedor (inyectable) y el intervalo del bucle del worker;
 - la hora de los UUID v7.
-
-Las ventanas de las purgas y de las anomalías se calculan en SQL con `now()`, de modo que la consulta y sus datos usan la misma hora.
 
 **Salvaguardas anti-duplicados (rev. 2026-10):**
 1. `Idempotency-Key = message.id` hacia el proveedor (deduplicación de 24 h).

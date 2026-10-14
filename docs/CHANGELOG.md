@@ -10,7 +10,7 @@ Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
   - Reproducido de forma determinista fijando la misma IP en todos los tests: 5 de 6 fallan en esa línea con el mismo mensaje. Un cambio de minuto a mitad del test produce otro fallo (en la línea 97, no en la 77), así que no era la causa.
 - **Arreglo del test:** cada test construye su propio autenticador, ventanas, conjunto de prefijos y alertas sobre un reloj fijo a mitad de minuto y de hora, que avanza explícitamente. Las IPs salen de un contador y no se repiten. Ahora comprueba además el `Retry-After` exacto y la auditoría de la hora siguiente.
 - **Producción:** lo que leía la hora del sistema en decisiones de ventana pasa al `Clock`:
-  - `MessageProcessor`: ventana de 23 h, próximo intento y tiempo hasta `SENT`;
+  - `MessageProcessor`: ventana de 23 h y próximo intento;
   - `ResendEmailSender`: `Retry-After` con fecha HTTP;
   - `WebhookController`: hora de respaldo;
   - `AcceptanceRateLimiter`: ventanas y `Retry-After`;
@@ -23,6 +23,10 @@ Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
   - `ProviderRateLimiterTest`: el test de concurrencia ya no mide `System.nanoTime`, asigna huecos con el tiempo detenido;
   - `ResendEmailSenderTest`: `Retry-After` exacto con reloj fijo.
 - **`MutableClock.fixAt`** permite fijar el reloj compartido; `reset()` lo devuelve a la hora del sistema.
+- **Fuente de la hora** (docs/05): una decisión usa una sola fuente en sus dos extremos.
+  - Los puntos donde se encuentran el `Clock` y `now()` de PostgreSQL están analizados frente a un desfase de segundos. La ventana de 23 h sigue por debajo de las 24 h de idempotencia de Resend con ~59 min de margen.
+  - El tiempo aceptación → `SENT` (NFR-19) se calcula ahora en SQL (`sent_at - created_at`), porque mezclar fuentes sesgaba un objetivo de 5 s.
+- **Webhooks:** `SvixWebhookVerifierTest` comprueba la frontera exacta en los dos sentidos (300 s aceptado, 301 s rechazado, en pasado y en futuro). El caso aceptado en futuro faltaba.
 
 ## 2026-10-12 — H7, parte 3: mantenimiento y observabilidad (H7 completo)
 
