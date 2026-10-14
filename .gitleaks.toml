@@ -1,0 +1,9 @@
+# Default gitleaks rules, plus one narrow exception: the fictional local-development webhook secret
+# in .env.example, by its exact value. Any other secret, in any file, is still reported.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fictional local webhook secret in .env.example, used by scripts/simulate-event.sh"
+regexTarget = "match"
+regexes = ['''whsec_bG9jYWwtZGV2LXdlYmhvb2stc2VjcmV0LW5vdC1yZWFs''']
