@@ -482,7 +482,7 @@ svix-signature: v1,k8s9…
 | 422 | `TEMPLATE_VARIABLES_INVALID` | Variables faltantes, de tipo incorrecto o que rompen el render |
 | 422 | `TEMPLATE_NOT_PUBLISHED` | Sin versión publicada |
 | 422 | `TEMPLATE_SYNTAX_ERROR` / `UNSAFE_TEMPLATE_CONSTRUCT` | Plantilla inválida o insegura |
-| 422 | `UNSAFE_URL` | **(rev. 2026-10)** Variable URL no `https` o fuera de `allowedLinkHosts` |
+| 422 | `UNSAFE_URL` | **(rev. 2026-10)** Variable URL no `https` o fuera de `allowedLinkHosts` (con `APP_ENV=local` se aceptan `localhost` y `*.localhost`, ADR-0021) |
 | 422 | `ATTACHMENT_INVALID` | **Reservado** (FR-30 Won't); no se emite en el MVP |
 | 422 | `SEND_AT_OUT_OF_RANGE` | **(rev. 2026-10)** `sendAt` más de `SEND_AT_PAST_TOLERANCE_SECONDS` (60 s) en el pasado o a más de 30 días |
 | 422 | `RECIPIENT_SUPPRESSED` | Solo en modo `reject` |

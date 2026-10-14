@@ -1,9 +1,12 @@
 # Local development only (docs/05 §7): app + PostgreSQL with the three roles + Mailpit.
 # Usage: cp .env.example .env && docker compose up --build
+# Other local projects join the network email-service-net and call http://email-service:8080
+# (docs/12-estado-y-uso-local.md).
 
 services:
   postgres:
     image: postgres:18-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: email_service
       POSTGRES_USER: postgres
@@ -25,11 +28,16 @@ services:
 
   mailpit:
     image: axllent/mailpit:v1.31.4
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8025:8025"
 
   app:
     build: .
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: [email-service]
     environment:
       APP_ENV: ${APP_ENV:-local}
       APP_ROLE: all
@@ -45,6 +53,8 @@ services:
       MAIL_PROVIDER: smtp
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
+      # Enables POST /webhooks/resend for scripts/simulate-event.sh; a local secret, never Resend's.
+      MAIL_WEBHOOK_SIGNING_SECRET: ${MAIL_WEBHOOK_SIGNING_SECRET:-}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xmx256m}
     ports:
       - "127.0.0.1:8080:8080"
@@ -53,6 +63,11 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+
+# A fixed name, whatever the folder is called, so other projects can declare it as external.
+networks:
+  default:
+    name: email-service-net
 
 volumes:
   pgdata:

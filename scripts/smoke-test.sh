@@ -3,13 +3,13 @@
 # sends through SMTP, and the email shows up in Mailpit (AC-15.1, AC-15.2). Mailpit never delivers
 # outside, and the recipient is a unique address on the reserved example.test domain.
 #
-# Usage: [EMAIL_SERVICE_API_KEY=esk_...] [BASE_URL=...] [MAILPIT_URL=...] scripts/smoke-test.sh
+# Usage: [EMAIL_SERVICE_API_KEY=esk_...] [EMAIL_SERVICE_URL=...] [MAILPIT_URL=...] scripts/smoke-test.sh
 # Without EMAIL_SERVICE_API_KEY it runs scripts/seed-local.sh and uses the product key it issues.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${EMAIL_SERVICE_URL:-${BASE_URL:-http://localhost:8080}}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-30}"
 
@@ -24,7 +24,7 @@ curl -fsS -o /dev/null "$MAILPIT_URL/api/v1/info" || fail "Mailpit is not reacha
 
 API_KEY="${EMAIL_SERVICE_API_KEY:-}"
 if [[ -z "$API_KEY" ]]; then
-	API_KEY="$(./scripts/seed-local.sh | grep -o 'Product key.*' | grep -oE 'esk_[a-z]+_[0-9A-Za-z]{8}_[0-9A-Za-z]{43}')" \
+	API_KEY="$(./scripts/seed-local.sh --new-keys | grep -o 'Product key.*' | grep -oE 'esk_[a-z]+_[0-9A-Za-z]{8}_[0-9A-Za-z]{43}')" \
 		|| fail "could not obtain a product key from seed-local.sh"
 fi
 

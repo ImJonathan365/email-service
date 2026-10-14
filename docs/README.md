@@ -21,6 +21,7 @@ Microservicio interno y centralizado de envío de correo **transaccional** para 
 | [09-roadmap.md](09-roadmap.md) | Fases: MVP y mejoras posteriores con disparadores medibles |
 | [10-guia-para-agentes-ia.md](10-guia-para-agentes-ia.md) | Contexto y reglas para modelos de IA que asistan en el desarrollo |
 | [11-correo-masivo.md](11-correo-masivo.md) | Correo masivo y marketing: por qué todavía no, disparador, separación obligatoria y requisitos |
+| [12-estado-y-uso-local.md](12-estado-y-uso-local.md) | Estado del proyecto (hitos, H9, Fase 0, decisiones pendientes) y guía para usar el servicio desde otros proyectos en local |
 | [adr/](adr/) | Architecture Decision Records (decisiones y su porqué) |
 | [auditoria/](auditoria/) | Informe de auditoría del 2026-10-05, resumen de decisiones y preguntas abiertas |
 | [CHANGELOG.md](CHANGELOG.md) | Registro de avance y decisiones |

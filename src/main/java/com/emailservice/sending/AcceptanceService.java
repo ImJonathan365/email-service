@@ -129,7 +129,8 @@ class AcceptanceService {
 			throw new ApiException(ErrorCode.TEMPLATE_VARIABLES_INVALID, "The variables do not match the template.",
 					invalid);
 		}
-		List<FieldError> unsafe = UrlPolicy.check(template.schema(), request.variables(), tenant.allowedLinkHosts());
+		List<FieldError> unsafe = UrlPolicy.check(template.schema(), request.variables(), tenant.allowedLinkHosts(),
+				properties.env());
 		if (!unsafe.isEmpty()) {
 			throw new ApiException(ErrorCode.UNSAFE_URL, "URL variables must be https on an allowed host.", unsafe);
 		}
