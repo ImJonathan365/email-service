@@ -5,7 +5,7 @@ Internal, centralized **transactional** email microservice used by my own produc
 
 **Source of truth: `/docs` (Spanish).** Read `docs/10-guia-para-agentes-ia.md` before any change,
 and the specific requirement in `docs/02-requisitos-funcionales.md`. If code and `/docs` disagree, `/docs` wins.
-ADR-0008…0014 and 0016…0020 are Accepted (0019 supersedes the API key cache of 0017; 0020 adds joint multi-locale publication to 0018); ADR-0015 (attachments) is Rejected — no attachments in the MVP.
+ADR-0008…0014 and 0016…0021 are Accepted (0019 supersedes the API key cache of 0017; 0020 adds joint multi-locale publication to 0018; 0021 accepts localhost links only with `APP_ENV=local`); ADR-0015 (attachments) is Rejected — no attachments in the MVP.
 
 ## Hard rules (no change without owner approval + ADR in docs/adr)
 
@@ -71,6 +71,7 @@ choose the most conservative option and leave `// TODO(owner-decision): …` lis
   `set -a; source .env; set +a; APP_ROLE=migrate ./gradlew bootRun`
 - Tests: `./gradlew test` (Docker required: Testcontainers)
 - RLS cost benchmark (ADR-0008/0019): `./gradlew benchmarkRls`
-- Seed local tenant + API keys + templates: `./scripts/seed-local.sh` (needs `jq`, declared in `mise.toml`)
-- Publish a template kept as code: `EMAIL_SERVICE_TEMPLATES_KEY=esk_... ./scripts/publish-template.sh {tenant} {templateKey}` (docs/05 §9)
+- Seed local tenant + API keys + templates: `[SLUG=demo] ./scripts/seed-local.sh [--new-keys]` (idempotent; needs `jq`, declared in `mise.toml`)
+- Publish a template kept as code: `EMAIL_SERVICE_TEMPLATES_KEY=esk_... ./scripts/publish-template.sh {tenant} {templateKey}` or `... publish-template.sh path/to/folder` from any repo (docs/05 §9)
+- Simulate a signed Resend event locally: `./scripts/simulate-event.sh {messageId} delivered|bounced|complained|delayed` (docs/12)
 - End-to-end smoke test: `./scripts/smoke-test.sh`

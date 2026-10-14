@@ -286,7 +286,7 @@ Quedan fuera de la regla:
 | `MAIL_PROVIDER` | `smtp` | `resend` \| `smtp` \| `noop`. **(rev. 2026-10-07)** `noop` (no envía nada) no arranca con `APP_ENV=production`; con `noop` no se crea ningún cliente SMTP |
 | `RESEND_API_KEY` | — | Secreto; **obligatoria** con `MAIL_PROVIDER=resend` (rev. 2026-10-10). Nunca se registra en logs |
 | `RESEND_API_URL` | `https://api.resend.com` | (rev. 2026-10-10) Base de la API; debe ser `https` salvo con `APP_ENV=local` (pruebas contra un stub) |
-| `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación. **(rev. 2026-10-11)** Obligatorio con `MAIL_PROVIDER=resend` y `APP_ROLE=api\|all`; cada valor `whsec_` + base64. Sin él, `/webhooks/resend` no existe |
+| `MAIL_WEBHOOK_SIGNING_SECRET` | — | Secreto del endpoint de webhooks (Svix); admite dos valores separados por coma durante una rotación. **(rev. 2026-10-11)** Obligatorio con `MAIL_PROVIDER=resend` y `APP_ROLE=api\|all`; cada valor `whsec_` + base64. Sin él, `/webhooks/resend` no existe. **(rev. 2026-10-14)** En local, `docker-compose.yml` pasa el secreto ficticio de `.env.example` para `scripts/simulate-event.sh` (docs/12) |
 | `WEBHOOK_TOLERANCE_SECONDS` | `300` | Ventana de timestamp (1–3600) |
 | `SMTP_HOST` / `SMTP_PORT` | `mailpit` / `1025` | Modo desarrollo |
 | `ALLOW_SMTP_IN_PRODUCTION` | `false` | Fail-fast si `production` + `smtp` |
@@ -361,26 +361,27 @@ email-service/
 ├── templates/                    # (rev. 2026-10-06) plantillas como código: {tenant}/{templateKey}/ (§9)
 └── scripts/
     ├── init-db-roles.sql         # crea email_owner, email_app, email_system (local)
-    ├── seed-local.sh             # tenant demo + API keys (envío y plantillas) + plantilla de ejemplo
-    ├── publish-template.sh       # (rev. 2026-10-06) publica una plantilla de templates/ (§9)
+    ├── seed-local.sh             # tenant (SLUG, demo por defecto) + API keys + sus plantillas; idempotente, --new-keys
+    ├── simulate-event.sh         # (rev. 2026-10-14) evento de Resend simulado y firmado, solo desarrollo (docs/12)
+    ├── publish-template.sh       # (rev. 2026-10-06) publica una carpeta de plantilla (§9)
     └── smoke-test.sh             # envío de prueba de extremo a extremo contra Mailpit
 ```
 
 ## 9. Plantillas como código (rev. 2026-10-06)
 
-Las plantillas de cada producto se versionan en este repositorio y se publican con un script a través de la API. Nadie edita HTML en producción a mano, y cada cambio pasa por revisión y por CI.
+Las plantillas se versionan como código, en este repositorio o **(rev. 2026-10-14)** en el del propio producto, y se publican con un script a través de la API. Nadie edita HTML en producción a mano, y cada cambio pasa por revisión y por CI.
 
-**Estructura** — `templates/{tenant}/{templateKey}/`:
+**Estructura** — una carpeta por plantilla; en este repositorio, `templates/{tenant}/{templateKey}/`:
 
 | Archivo | Contenido |
 |---|---|
-| `template.json` | `key` (igual al nombre de la carpeta), `name`, `description`, `category`, `trackingEnabled`, `subject` (un asunto por locale), `variablesSchema` (subconjunto de `06` §3.3) y `previewVariables` (datos de ejemplo, ficticios, para la previsualización) |
+| `template.json` | `key` (en este repositorio, igual al nombre de la carpeta), `name`, `description`, `category`, `trackingEnabled`, `subject` (un asunto por locale), `variablesSchema` (subconjunto de `06` §3.3) y `previewVariables` (datos de ejemplo, ficticios, para la previsualización) |
 | `{locale}.html` | Cuerpo HTML; uno por cada locale de `subject` (obligatorio) |
 | `{locale}.txt` | Alternativa en texto plano (opcional) |
 
 Ejemplo: `templates/demo/password-reset/` (`es-CR` y `en`).
 
-**Publicar** — `EMAIL_SERVICE_TEMPLATES_KEY=esk_... [BASE_URL=...] scripts/publish-template.sh {tenant} {templateKey}`:
+**Publicar** — `EMAIL_SERVICE_TEMPLATES_KEY=esk_... [EMAIL_SERVICE_URL=...] scripts/publish-template.sh ruta/a/la/carpeta`, o `... publish-template.sh {tenant} {templateKey}` para `templates/` de este repositorio. **(rev. 2026-10-14)** Funciona desde cualquier directorio y cualquier repositorio: la ruta es relativa al directorio actual, `EMAIL_SERVICE_URL` (por defecto `http://localhost:8080`; `BASE_URL` se acepta por compatibilidad) dice a qué servicio publicar, y la key determina el tenant. Ver `12-estado-y-uso-local.md`.
 
 1. La key debe pertenecer al tenant y tener `templates:write` y `emails:read`; es la key de operador, nunca la de un producto (FR-33).
 2. Si la plantilla no existe, la crea. Si existe con otra categoría, falla: cambiar la categoría exige una plantilla nueva (AC-36.4).
@@ -388,7 +389,7 @@ Ejemplo: `templates/demo/password-reset/` (`es-CR` y `en`).
 4. Crea un borrador por cada locale cambiado y lo previsualiza con `previewVariables`, con las mismas reglas que un envío real (esquema, escapado, `allowedLinkHosts`).
 5. Solo si todas las previsualizaciones pasan, publica. Con un solo locale cambiado usa la publicación individual; con varios, la publicación conjunta (ADR-0020): todos los locales en una transacción, así que se puede cambiar el conjunto `required` de una plantilla multilingüe. Si algo falla, no queda nada publicado: el script borra los borradores que creó y termina con error mostrando el `problem+json`.
 
-Requiere `curl` y `jq` (`jq` está declarado en `mise.toml`). `scripts/seed-local.sh` publica todas las plantillas de `templates/{slug}/` del tenant de demo.
+Requiere `curl` y `jq` (`jq` está declarado en `mise.toml`). `scripts/seed-local.sh` publica todas las plantillas de `templates/{slug}/` del tenant que crea.
 
 **En CI**, `TemplatesAsCodeTest` pasa cada `template.json` por las mismas comprobaciones que el servicio al guardar, publicar y previsualizar. Una plantilla rota falla el build antes de llegar al script.
 
