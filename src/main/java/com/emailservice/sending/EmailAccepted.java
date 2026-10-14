@@ -12,5 +12,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record EmailAccepted(UUID id, String status, String templateKey, int templateVersion, String locale, String to,
-		List<String> droppedRecipients, String failureCode, String suppressionReason, Instant createdAt) {
+		List<String> droppedRecipients, String failureCode, String suppressionReason, Instant sendAt,
+		Instant createdAt) {
 }

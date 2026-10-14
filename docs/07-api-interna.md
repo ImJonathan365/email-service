@@ -92,7 +92,7 @@ Content-Type: application/json
 | `locale` | string | No | **(rev. 2026-10, FR-37)** `es-CR` (default del tenant) \| `en`; si no hay traducción publicada, cae a `tenant.locale` |
 | `fromName` | string | No | **(rev. 2026-10, AC-09.5)** Nombre visible del remitente, ≤ 80 caracteres (p. ej., "Pulpería La Esquina vía Colmena") |
 | `from` | string | No | **(rev. 2026-10-07, AC-09.2)** Dirección del remitente; su dominio (o un subdominio) debe estar en `allowedFromDomains` del tenant, si no `403 FROM_DOMAIN_NOT_ALLOWED`. Por defecto, `tenant.fromEmail` |
-| `sendAt` | string | No | **(rev. 2026-10, FR-31, Should)** ISO-8601 con zona; entre ahora y +30 días; la versión se fija al aceptar |
+| `sendAt` | string | No | **(rev. 2026-10, FR-31, Should)** ISO-8601 con zona; entre ahora y +30 días; la versión se fija al aceptar. **(rev. 2026-10-13)** Hasta 60 s en el pasado (`SEND_AT_PAST_TOLERANCE_SECONDS`) cuenta como ahora; la respuesta y `GET /v1/emails/{id}` lo devuelven como `sendAt` |
 | `attachments` | — | — | **No disponible** (FR-30 Won't): se rechaza con `422 VALIDATION_ERROR` |
 
 **202 Accepted**
@@ -126,7 +126,12 @@ Content-Type: application/json
 
   Todo ocurre en una transacción de tenant. Una repetición con la misma `Idempotency-Key` y el mismo cuerpo responde `200` antes de cualquier validación.
 - **`request_hash`:** es el SHA-256 del cuerpo canónico; el orden de las claves y los espacios no cuentan. La `Idempotency-Key` admite de 1 a 256 caracteres ASCII imprimibles.
-- **`sendAt`:** responde `422 VALIDATION_ERROR` ("not supported yet", FR-31 llega en H8), en lugar de ignorarse.
+- **`sendAt`** (rev. 2026-10-13, H8):
+  - el mensaje espera en `QUEUED` hasta esa hora;
+  - la versión de plantilla, la supresión y la cuota se resuelven al aceptar, y la supresión se comprueba otra vez al enviar;
+  - la ventana de 23 h empieza en el primer intento (AC-31.4);
+  - si el tenant está en pausa a esa hora, el mensaje sigue `QUEUED` y sale al reanudarse;
+  - errores: fuera del rango → `422 SEND_AT_OUT_OF_RANGE`; sin zona o ilegible → `422 VALIDATION_ERROR`.
 - **`attachments`:** responde `422 VALIDATION_ERROR` (FR-30).
 - **Destinatario `to` suprimido:**
   - el mensaje se crea en `FAILED` con `failureCode = SUPPRESSED` y `suppressionReason`;
@@ -165,6 +170,15 @@ Content-Type: application/json
 - Máximo 100 elementos y 1 MB; cada elemento admite `locale` y `sendAt`. `idempotencyKey` es obligatorio por elemento (la cabecera `Idempotency-Key` se ignora en este endpoint).
 - Los elementos aceptados se insertan en una transacción (medido: ~0,25 ms/mensaje frente a ~0,75 ms con una transacción por mensaje).
 - No es una herramienta de campañas: los envíos `NOTICE` siguen sujetos a cuota, a la detección de anomalías y a la prioridad más baja (ADR-0013).
+
+## 4.1 `POST /v1/emails/{id}/cancel` — cancelar (rev. 2026-10-13, FR-26, H8)
+
+- **Qué hace:** cancela un mensaje que sigue `QUEUED`, también uno programado con `sendAt` o de un tenant en pausa.
+- **Respuesta:** `200` con el mismo cuerpo que `GET /v1/emails/{id}`: `status = CANCELED`, `failureCode = CANCELED_BY_CLIENT`.
+- **Errores:**
+  - en cualquier otro estado, incluido el de un mensaje que el worker acaba de tomar, `409 MESSAGE_NOT_CANCELABLE`;
+  - un id inexistente o de otro tenant, `404 MESSAGE_NOT_FOUND`.
+- **Scope:** requiere `emails:send`.
 
 ## 5. `GET /v1/emails/{id}` — estado
 
@@ -459,7 +473,7 @@ svix-signature: v1,k8s9…
 | 422 | `TEMPLATE_SYNTAX_ERROR` / `UNSAFE_TEMPLATE_CONSTRUCT` | Plantilla inválida o insegura |
 | 422 | `UNSAFE_URL` | **(rev. 2026-10)** Variable URL no `https` o fuera de `allowedLinkHosts` |
 | 422 | `ATTACHMENT_INVALID` | **Reservado** (FR-30 Won't); no se emite en el MVP |
-| 422 | `SEND_AT_OUT_OF_RANGE` | **(rev. 2026-10)** `sendAt` en el pasado o a más de 30 días |
+| 422 | `SEND_AT_OUT_OF_RANGE` | **(rev. 2026-10)** `sendAt` más de `SEND_AT_PAST_TOLERANCE_SECONDS` (60 s) en el pasado o a más de 30 días |
 | 422 | `RECIPIENT_SUPPRESSED` | Solo en modo `reject` |
 | 429 | `RATE_LIMITED` | Límite por minuto o cuota diaria (incluye `Retry-After`). **(rev. 2026-10-12)** También una IP con demasiados `401`, solo en peticiones sin prefijo de key conocido (`08` §4) |
 | 500 | `INTERNAL_ERROR` | Fallo no esperado (sin detalles internos) |

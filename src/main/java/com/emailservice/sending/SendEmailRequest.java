@@ -25,7 +25,9 @@ public record SendEmailRequest(
 		@Schema(type = "object") @NotNull JsonNode variables,
 		@Size(max = 10) List<String> tags,
 		@Schema(type = "object") JsonNode metadata,
-		@Schema(hidden = true) JsonNode sendAt,
+		@Schema(type = "string", format = "date-time", example = "2026-10-20T08:00:00-06:00",
+				description = "Send at this time (FR-31): ISO-8601 with a time zone, up to SEND_AT_MAX_DAYS ahead; "
+						+ "up to SEND_AT_PAST_TOLERANCE_SECONDS in the past counts as now") String sendAt,
 		@Schema(hidden = true) JsonNode attachments) {
 
 	public record Recipient(@Schema(example = "ana@example.com") @NotBlank String email,
