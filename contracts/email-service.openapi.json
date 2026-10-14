@@ -140,6 +140,10 @@
           "renderedText" : {
             "type" : "string"
           },
+          "sendAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
           "sentAt" : {
             "format" : "date-time",
             "type" : "string"
@@ -186,6 +190,10 @@
             "type" : "string"
           },
           "locale" : {
+            "type" : "string"
+          },
+          "sendAt" : {
+            "format" : "date-time",
             "type" : "string"
           },
           "status" : {
@@ -480,6 +488,12 @@
           "replyTo" : {
             "type" : "string"
           },
+          "sendAt" : {
+            "description" : "Send at this time (FR-31): ISO-8601 with a time zone, up to SEND_AT_MAX_DAYS ahead; up to SEND_AT_PAST_TOLERANCE_SECONDS in the past counts as now",
+            "example" : "2026-10-20T08:00:00-06:00",
+            "format" : "date-time",
+            "type" : "string"
+          },
           "tags" : {
             "items" : {
               "type" : "string"
@@ -685,7 +699,7 @@
             "type" : "string"
           },
           "variablesSchema" : {
-            "type" : "string"
+            "$ref" : "#/components/schemas/JsonNode"
           },
           "version" : {
             "format" : "int32",
@@ -938,6 +952,37 @@
           "apiKey" : [ ]
         } ],
         "summary" : "State, attempts and event history of one message (FR-19)",
+        "tags" : [ "Emails" ]
+      }
+    },
+    "/v1/emails/{id}/cancel" : {
+      "post" : {
+        "operationId" : "cancel",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "summary" : "Cancel a message that is still QUEUED, including a scheduled one (FR-26, AC-31.3)",
         "tags" : [ "Emails" ]
       }
     },

@@ -28,7 +28,7 @@ class AppPropertiesTest {
 	static final AppProperties.Mail NOOP_MAIL = new AppProperties.Mail("noop", null, 0, false, 3_000, 10_000);
 
 	static final AppProperties.Sending SENDING = new AppProperties.Sending("hash-key-0123456789abcdef0123456789",
-			"accept", List.of(), 262_144);
+			"accept", List.of(), 262_144, 30, 60, 100, 1_048_576);
 
 	static AppProperties props(AppEnv env, AppRole role, Db db) {
 		return new AppProperties(env, role, db, null, ADMIN, null, mailFor(env), SENDING, null, null);
@@ -227,13 +227,32 @@ class AppPropertiesTest {
 	}
 
 	@Test
+	void fr_31_and_fr_35_scheduledSendingAndBatchLimitsAreValidated() {
+		String key = "hash-key-0123456789abcdef0123456789";
+		assertThat(local(NOOP_MAIL, SENDING, null).sending().sendAtPastToleranceSeconds()).isEqualTo(60);
+		assertThatThrownBy(() -> local(NOOP_MAIL,
+				new AppProperties.Sending(key, "accept", List.of(), 262_144, 400, 601, 2_000, 1_000), null))
+			.hasMessageContaining("SEND_AT_MAX_DAYS")
+			.hasMessageContaining("SEND_AT_PAST_TOLERANCE_SECONDS")
+			.hasMessageContaining("MAX_BATCH_ITEMS")
+			.hasMessageContaining("MAX_BATCH_BYTES");
+		assertThat(local(NOOP_MAIL, new AppProperties.Sending(key, "accept", List.of(), 262_144, 30, 0, 100, 1_048_576),
+				null).sending().sendAtPastToleranceSeconds())
+			.as("zero means no tolerance at all")
+			.isZero();
+	}
+
+	@Test
 	void suppressionHashKeyIsARequiredSecretAndRejectModeIsClosed() {
-		assertThatThrownBy(() -> local(NOOP_MAIL, new AppProperties.Sending("short-key", "accept", List.of(), 262_144), null))
+		assertThatThrownBy(() -> local(NOOP_MAIL,
+				new AppProperties.Sending("short-key", "accept", List.of(), 262_144, 30, 60, 100, 1_048_576), null))
 			.hasMessageContaining("SUPPRESSION_HASH_KEY")
 			.message()
 			.doesNotContain("short-key");
 		assertThatThrownBy(() -> local(NOOP_MAIL,
-				new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "drop", List.of(), 262_144), null))
+				new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "drop", List.of(), 262_144, 30, 60, 100,
+						1_048_576),
+				null))
 			.hasMessageContaining("SUPPRESSION_REJECT_MODE");
 		assertThat(local(NOOP_MAIL, SENDING, null).toString()).doesNotContain("hash-key-0123456789abcdef0123456789");
 	}
@@ -245,7 +264,7 @@ class AppPropertiesTest {
 				null, null))
 			.hasMessageContaining("ALLOWED_RECIPIENT_DOMAINS");
 		var allowlisted = new AppProperties.Sending("hash-key-0123456789abcdef0123456789", "accept",
-				List.of(" Example.TEST "), 262_144);
+				List.of(" Example.TEST "), 262_144, 30, 60, 100, 1_048_576);
 		assertThat(new AppProperties(AppEnv.STAGING, AppRole.API, db, null, ADMIN, null, NOOP_MAIL, allowlisted, null, null)
 			.sending()
 			.allowedRecipientDomains()).containsExactly("example.test");

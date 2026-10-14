@@ -3,8 +3,12 @@ package com.emailservice.sending;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -69,9 +73,12 @@ class AcceptanceService {
 
 	private final MeterRegistry meters;
 
+	private final Clock clock;
+
 	AcceptanceService(MessageRepository messages, TemplateResolver resolver, TemplateEngine engine,
 			SuppressionHashes hashes, AcceptanceRateLimiter rateLimiter, AppProperties properties, JsonMapper jsonMapper,
-			MeterRegistry meters) {
+			MeterRegistry meters, Clock clock) {
+		this.clock = clock;
 		this.messages = messages;
 		this.resolver = resolver;
 		this.engine = engine;
@@ -111,6 +118,7 @@ class AcceptanceService {
 		}
 
 		validate(request, tenant);
+		Instant sendAt = sendAt(request.sendAt());
 		TemplateResolver.Resolved template = resolver.resolve(tenantId, request.templateKey(), request.templateVersion(),
 				request.locale(), tenant.locale());
 		if (template.fellBack()) {
@@ -150,7 +158,7 @@ class AcceptanceService {
 				request.tags() == null ? List.of() : request.tags(),
 				request.metadata() == null || request.metadata().isNull() ? null
 						: jsonMapper.writeValueAsString(request.metadata()),
-				template.trackingEnabled());
+				template.trackingEnabled(), sendAt);
 
 		Optional<Instant> createdAt = messages.insert(message);
 		if (createdAt.isEmpty()) {
@@ -158,7 +166,7 @@ class AcceptanceService {
 			return repeat(messages.findByIdempotencyKey(tenantId, idempotencyKey).orElseThrow(), requestHash, request);
 		}
 		return new Outcome(new EmailAccepted(id, status, template.templateKey(), template.version(), template.locale(),
-				message.toEmail(), recipients.dropped(), message.failureCode(), recipients.toSuppression(),
+				message.toEmail(), recipients.dropped(), message.failureCode(), recipients.toSuppression(), sendAt,
 				createdAt.get()), true);
 	}
 
@@ -179,7 +187,35 @@ class AcceptanceService {
 		String suppressionReason = "SUPPRESSED".equals(original.failureCode()) ? original.failureDetail() : null;
 		return new Outcome(new EmailAccepted(original.id(), original.status(), original.templateKey(),
 				original.templateVersion(), original.locale(), original.toEmail(), dropped, original.failureCode(),
-				suppressionReason, original.createdAt()), false);
+				suppressionReason, original.sendAt(), original.createdAt()), false);
+	}
+
+	/**
+	 * FR-31: ISO-8601 with a time zone, at most SEND_AT_MAX_DAYS ahead. Up to
+	 * SEND_AT_PAST_TOLERANCE_SECONDS in the past still counts as now (owner, H8): a client that asks
+	 * for "now" must not be refused for latency or clock skew. Measured with the application Clock
+	 * (docs/05, time source). Null when the message goes out at once.
+	 */
+	private Instant sendAt(String value) {
+		if (value == null) {
+			return null;
+		}
+		Instant at;
+		try {
+			at = OffsetDateTime.parse(value.trim()).toInstant();
+		}
+		catch (DateTimeParseException ex) {
+			throw ApiException.validation(
+					List.of(new FieldError("sendAt", "must be an ISO-8601 date-time with a time zone")));
+		}
+		Instant now = clock.instant();
+		AppProperties.Sending sending = properties.sending();
+		if (at.isBefore(now.minusSeconds(sending.sendAtPastToleranceSeconds()))
+				|| at.isAfter(now.plus(Duration.ofDays(sending.sendAtMaxDays())))) {
+			throw new ApiException(ErrorCode.SEND_AT_OUT_OF_RANGE, "sendAt must be between now and "
+					+ sending.sendAtMaxDays() + " days ahead.");
+		}
+		return at;
 	}
 
 	/** FR-07 and FR-09 field rules, grouped by the code each kind of failure maps to. */
@@ -199,9 +235,6 @@ class AcceptanceService {
 		}
 
 		List<FieldError> invalid = new ArrayList<>();
-		if (request.sendAt() != null && !request.sendAt().isNull()) {
-			invalid.add(new FieldError("sendAt", "is not supported yet: scheduled sending (FR-31) arrives in milestone H8"));
-		}
 		if (request.attachments() != null && !request.attachments().isNull()) {
 			invalid.add(new FieldError("attachments", "are not supported (FR-30); send a signed link instead"));
 		}

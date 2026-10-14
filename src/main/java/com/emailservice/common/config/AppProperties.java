@@ -248,14 +248,23 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 	}
 
 	/** Acceptance settings (FR-07, FR-09, FR-10). */
+	/**
+	 * Acceptance settings: suppressions (FR-10), the staging allowlist (AC-09.4), body size
+	 * (AC-07.6), scheduled sending (FR-31: how far ahead, and how far in the past still counts as
+	 * now) and the batch endpoint (FR-35).
+	 */
 	public record Sending(String suppressionHashKey, String suppressionRejectMode, List<String> allowedRecipientDomains,
-			int maxRequestBytes) {
+			int maxRequestBytes, int sendAtMaxDays, int sendAtPastToleranceSeconds, int maxBatchItems,
+			int maxBatchBytes) {
 
 		static final int MIN_HASH_KEY_LENGTH = 32;
 
-		static final Sending DEFAULTS = new Sending("", "accept", List.of(), 262_144);
+		static final Sending DEFAULTS = new Sending("", "accept", List.of(), 262_144, 30, 60, 100, 1_048_576);
 
 		public Sending {
+			sendAtMaxDays = sendAtMaxDays == 0 ? 30 : sendAtMaxDays;
+			maxBatchItems = maxBatchItems == 0 ? 100 : maxBatchItems;
+			maxBatchBytes = maxBatchBytes == 0 ? 1_048_576 : maxBatchBytes;
 			suppressionRejectMode = suppressionRejectMode == null ? "accept"
 					: suppressionRejectMode.trim().toLowerCase(Locale.ROOT);
 			allowedRecipientDomains = trimmed(allowedRecipientDomains).stream()
@@ -280,12 +289,26 @@ public record AppProperties(AppEnv env, AppRole role, Db db, Http http, Admin ad
 			if (maxRequestBytes < 1_024) {
 				problems.add("MAX_REQUEST_BYTES must be at least 1024");
 			}
+			if (sendAtMaxDays < 1 || sendAtMaxDays > 365) {
+				problems.add("SEND_AT_MAX_DAYS must be between 1 and 365");
+			}
+			if (sendAtPastToleranceSeconds < 0 || sendAtPastToleranceSeconds > 600) {
+				problems.add("SEND_AT_PAST_TOLERANCE_SECONDS must be between 0 and 600");
+			}
+			if (maxBatchItems < 1 || maxBatchItems > 1_000) {
+				problems.add("MAX_BATCH_ITEMS must be between 1 and 1000");
+			}
+			if (maxBatchBytes < maxRequestBytes) {
+				problems.add("MAX_BATCH_BYTES must be at least MAX_REQUEST_BYTES");
+			}
 		}
 
 		@Override
 		public String toString() {
 			return "Sending[suppressionHashKey=***, suppressionRejectMode=" + suppressionRejectMode
-					+ ", allowedRecipientDomains=" + allowedRecipientDomains + ", maxRequestBytes=" + maxRequestBytes + "]";
+					+ ", allowedRecipientDomains=" + allowedRecipientDomains + ", maxRequestBytes=" + maxRequestBytes
+					+ ", sendAtMaxDays=" + sendAtMaxDays + ", sendAtPastToleranceSeconds=" + sendAtPastToleranceSeconds
+					+ ", maxBatchItems=" + maxBatchItems + ", maxBatchBytes=" + maxBatchBytes + "]";
 		}
 
 	}

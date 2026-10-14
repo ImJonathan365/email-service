@@ -53,10 +53,14 @@ class EmailController {
 
 	private final MeterRegistry meters;
 
-	EmailController(AcceptanceService acceptance, EmailQueries queries, MeterRegistry meters) {
+	private final Cancellation cancellation;
+
+	EmailController(AcceptanceService acceptance, EmailQueries queries, MeterRegistry meters,
+			Cancellation cancellation) {
 		this.acceptance = acceptance;
 		this.queries = queries;
 		this.meters = meters;
+		this.cancellation = cancellation;
 	}
 
 	@PostMapping
@@ -74,6 +78,16 @@ class EmailController {
 			.register(meters));
 		MDC.put("messageId", outcome.body().id().toString());
 		return ResponseEntity.status(outcome.created() ? HttpStatus.ACCEPTED : HttpStatus.OK).body(outcome.body());
+	}
+
+	@PostMapping("/{id}/cancel")
+	@RequiresScope(Scope.EMAILS_SEND)
+	@Transactional
+	@Operation(summary = "Cancel a message that is still QUEUED, including a scheduled one (FR-26, AC-31.3)")
+	EmailViews.Detail cancel(@PathVariable UUID id, HttpServletRequest request) {
+		UUID tenantId = AuthenticatedApiKey.from(request).tenantId();
+		cancellation.cancel(tenantId, id);
+		return queries.detail(tenantId, id).orElseThrow();
 	}
 
 	@GetMapping("/{id}")

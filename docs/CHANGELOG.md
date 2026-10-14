@@ -2,6 +2,26 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-13 — H8, parte 1: envío programado y cancelación
+
+- **Hecho:**
+  - **`sendAt`** (FR-31):
+    - ISO-8601 con zona, hasta `SEND_AT_MAX_DAYS` (30) por delante;
+    - hasta `SEND_AT_PAST_TOLERANCE_SECONDS` (60, configurable) en el pasado cuenta como ahora (owner); más allá, `422 SEND_AT_OUT_OF_RANGE`;
+    - se valida con el `Clock`; fija `send_at` y `next_attempt_at`;
+    - la versión, la supresión y la cuota se resuelven al aceptar; la ventana de 23 h empieza en el primer intento;
+    - aparece en la respuesta, en las repeticiones idempotentes y en `GET /v1/emails/{id}`.
+  - **`POST /v1/emails/{id}/cancel`** (FR-26, adelantado a H8 por AC-31.3):
+    - bloqueo de la fila y `UPDATE` condicional sobre `QUEUED`: nunca cancela un mensaje que el worker ya tomó;
+    - `404` para un id ajeno o inexistente (RLS), `409` en otro estado o al cancelar dos veces;
+    - funciona con el tenant en pausa;
+    - quita las variables `x-sensitive`.
+  - **Tests:**
+    - fronteras exactas con reloj fijo (60/61 s en el pasado, 30 días/30 días + 1 s);
+    - versión fijada al aceptar;
+    - mensaje programado de un tenant en pausa: sigue `QUEUED` y sale al reanudarse;
+    - una carrera determinista con la toma (la toma gana) y una concurrente de 20 mensajes con estado final coherente.
+
 ## 2026-10-13 — Tests dependientes de la hora: deterministas
 
 - **Causa del fallo de CI** (PR #5, `AuthIpLimitTest:77`):

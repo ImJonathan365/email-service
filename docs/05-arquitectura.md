@@ -224,12 +224,12 @@ Regla: una decisión usa una sola fuente en sus dos extremos. Si compara con col
 | Fuente | Decisiones | Por qué |
 |---|---|---|
 | `now()` de PostgreSQL | Toma de la cola (`next_attempt_at <= now()`), locks y barrido, `first_attempt_at`, `sent_at`, `finalized_at`, purgas, anomalías, métricas de cola y tiempo aceptación → `SENT` (NFR-19), expiración de API keys | Los datos y el corte se miden con el mismo reloj, en la misma sentencia |
-| `Clock` de la aplicación | Circuit breaker, `401` por IP, refresco de prefijos, deduplicación de alertas, ventanas del rate limit y su auditoría horaria, `Retry-After`, ventana de firma de webhooks, ventana de 23 h y próximo intento del worker | Estado en memoria o calculado por la aplicación; los tests lo fijan y lo avanzan sin depender de cuándo corren |
+| `Clock` de la aplicación | Circuit breaker, `401` por IP, refresco de prefijos, deduplicación de alertas, ventanas del rate limit y su auditoría horaria, `Retry-After`, ventana de firma de webhooks, ventana de 23 h y próximo intento del worker, validación de `sendAt` | Estado en memoria o calculado por la aplicación; los tests lo fijan y lo avanzan sin depender de cuándo corren |
 
 **Puntos donde se encuentran las dos fuentes**, con un desfase de *s* segundos entre la aplicación y PostgreSQL:
 
 1. **Ventana de 23 h** (`first_attempt_at` lo escribe PostgreSQL y el worker lo compara con el `Clock`). La ventana efectiva queda en 23 h ± *s*. El límite que importa es el de idempotencia de Resend, 24 h desde el primer intento: queda 1 h de margen menos la duración de un intento (≤ `LOCK_TIMEOUT_SECONDS`, 60 s), así que es seguro mientras *s* < ~59 min. Con NTP, *s* es de milisegundos. La validación de arranque (AC-13.7) ya exige que backoff × 1,2 + intentos × lock < 23 h.
-2. **Próximo intento** (`next_attempt_at` lo escribe la aplicación y la toma de la cola lo compara con `now()`). El reintento se adelanta o retrasa *s*. El backoff mínimo es de 60 s ±20 %, y un `Retry-After` adelantado unos segundos solo produce otro `429` transitorio. Seguro.
+2. **Próximo intento y `sendAt`** (`next_attempt_at` lo escribe la aplicación y la toma de la cola lo compara con `now()`). El reintento o el envío programado se adelanta o retrasa *s*. El backoff mínimo es de 60 s ±20 %, y un `Retry-After` adelantado unos segundos solo produce otro `429` transitorio. Seguro.
 3. **Ventanas del rate limit** (`window_start` lo escribe la aplicación y la purga de contadores usa `now()` con un margen de 2 días). Seguro.
 4. **Hora de respaldo de un webhook sin `created_at`** (guardada en `occurred_at` junto a `received_at` de la BD). Solo afecta al orden de eventos que el proveedor no fechó. Seguro.
 5. **Corregido aquí:** el tiempo aceptación → `SENT` restaba `created_at` de la BD a la hora de la aplicación, y unos segundos de desfase sesgaban un objetivo de 5 s (NFR-19). Ahora `markSent` lo devuelve calculado en SQL (`sent_at - created_at`).
@@ -306,7 +306,8 @@ Quedan fuera de la regla:
 | `SENT_FINAL_AFTER_HOURS` | `72` | `SENT` sin eventos = final por tiempo |
 | `MAX_REQUEST_BYTES` | `262144` | Tamaño de payload |
 | `MAX_BATCH_ITEMS` / `MAX_BATCH_BYTES` | `100` / `1048576` | Endpoint de lote |
-| `SEND_AT_MAX_DAYS` | `30` | FR-31 |
+| `SEND_AT_MAX_DAYS` | `30` | FR-31 (1–365) |
+| `SEND_AT_PAST_TOLERANCE_SECONDS` | `60` | **(rev. 2026-10-13)** Cuánto en el pasado sigue contando como "ahora" (0–600) |
 | `SUPPORTED_LOCALES` | `es-CR,en` | FR-37 |
 | `SUPPRESSION_REJECT_MODE` | `accept` | `accept` (202 + `FAILED`) \| `reject` (422) |
 | `SUPPRESSION_HASH_KEY` | — | Clave HMAC de `email_hash` (secreto, obligatoria). **(rev. 2026-10-07)** ≥ 32 caracteres; se exige en todos los roles salvo `migrate` |
