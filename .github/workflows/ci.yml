@@ -42,6 +42,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: gitleaks/gitleaks-action@v3
+      # Both pinned: the action's default gitleaks version ignored the [[allowlists]] syntax once
+      # and failed the build. Bump them together, after checking .gitleaks.toml against the new version.
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.30.1"
