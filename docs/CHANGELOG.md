@@ -2,6 +2,20 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-15 — `v0.8.1`, gitleaks fijado y traspaso de sesión
+
+- **Hecho:**
+  - **Tag `v0.8.1`** sobre el merge de `dev` en `main` (PR #9): versión estable para usar el servicio desde otros proyectos en local.
+  - **CI:** gitleaks fijado en `8.30.1` (`GITLEAKS_VERSION`) y la action en el commit de `v3.0.0`. La versión por defecto de la action ignoraba `[[allowlists]]`, y fue lo que hizo fallar el primer CI de `feat/local-dev-integration`.
+  - **`docs/12` revisado para retomar sin el historial del chat:**
+    - cómo retomar;
+    - H9 parte A, ordenada: auditoría, producto simulado en `examples/`, guía de punta a punta con Resend real, manifiestos, respaldos, checklist e integración;
+    - H9 parte B, con la decisión de la que depende cada ítem;
+    - auditoría de la Fase 0 con evidencia;
+    - el paso de `.env` para `MAIL_WEBHOOK_SIGNING_SECRET`.
+- **Hallazgo:** de las 150 AC de los FR **Must**, 28 no tienen un test que las nombre. Puede que estén cubiertas con otro nombre, que no sean verificables con un test, o que falte el test. Revisarlas es el primer punto de la parte A (`12`). Hasta entonces, el criterio "FR Must cubiertos" de la Fase 0 queda **por auditar**, no hecho.
+- **Pendiente:** H9; las decisiones del owner están listadas en `12`.
+
 ## 2026-10-14 — Uso local desde otros proyectos (H9 en pausa)
 
 - **Hecho** (rama `feat/local-dev-integration`, no es un hito de `09`):

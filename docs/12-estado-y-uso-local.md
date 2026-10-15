@@ -1,10 +1,30 @@
 # 12 — Estado del proyecto y uso en local
 
-> Creado el 2026-10-14. Primera parte: dónde está el proyecto. Segunda parte: cómo usar el servicio desde otros proyectos en la máquina de desarrollo. Despliegue y H9 están en pausa hasta que el owner tome las decisiones de infraestructura.
+> Creado el 2026-10-14; revisado el 2026-10-15 para que otra sesión pueda retomar el trabajo sin el historial del chat. Primera parte: dónde está el proyecto y qué falta. Segunda parte: cómo usar el servicio desde otros proyectos en local. Despliegue y H9 están en pausa hasta que el owner tome las decisiones de infraestructura.
 
 ## Parte 1 — Estado actual
 
-### Hitos terminados
+### Para retomar el trabajo
+
+1. **Leer, en este orden:**
+   - `AGENTS.md`: reglas, ramas, tags y comandos;
+   - `docs/10-guia-para-agentes-ia.md`;
+   - este documento;
+   - el requisito concreto en `02`.
+2. **Versión estable:** `main` en `v0.8.1`. Es la que usan los otros proyectos en local.
+3. **Forma de trabajo con el owner:**
+   - plan primero, y esperar su OK antes de escribir código;
+   - una rama `feat/*` o `fix/*` desde `dev`, con commits Conventional que citan los FR;
+   - CI en verde antes de integrar en `dev` con `--no-ff`;
+   - `dev` → `main` lo hace solo el owner, y después el agente crea y sube el tag anotado.
+4. **CI:** `.github/workflows/ci.yml`, con dos jobs:
+   - `build`: tests con Testcontainers;
+   - `gitleaks`: versión fijada en `GITLEAKS_VERSION`; la configuración es `.gitleaks.toml` más `.gitleaksignore`.
+
+   Se dispara en `main`, `dev`, `feat/**`, `fix/**` y en los pull requests. Antes de esperar un CI, hay que comprobar que la rama está entre esos disparadores.
+5. **Lo siguiente:** la parte A de H9 (abajo), ítem por ítem y con plan previo. La parte B espera las decisiones del owner.
+
+### Hitos y versiones
 
 | Hito | Contenido | Tag |
 |---|---|---|
@@ -14,61 +34,66 @@
 | H6 | Webhooks, estados por precedencia y supresiones | sin tag propio: va dentro de `v0.7.0-h7` (decisión del owner) |
 | H7 | Operación y protección: consultas, cuotas, anomalías, métricas, alertas, purgas, borrado por titular | `v0.7.0-h7` |
 | H8 | Envío por lote, `sendAt` y cancelación | `v0.8.0-h8` |
+| — | Uso local desde otros proyectos: red Docker, seed idempotente, ADR-0021, eventos simulados, plantillas desde cualquier repositorio (parte 2) | `v0.8.1` |
 
-Después de H8, la rama `feat/local-dev-integration` añadió el uso local desde otros proyectos (esta guía, ADR-0021). No es un hito de `09`.
+### H9 (Producción), parte A: lo que se puede hacer en el repositorio
 
-### Qué falta de H9 (Producción)
+Ninguno de estos ítems necesita decisiones de infraestructura. Están ordenados por dependencia: la auditoría y el producto simulado van primero, porque el resto se apoya en ellos.
 
-H9 (`09`, `08` §10) se divide en dos partes:
+1. **Auditoría de cierre de la Fase 0**, con el detalle en la tabla de abajo.
+   - Cada criterio de `09` debe quedar marcado como hecho, con su evidencia (test o documento), o como pendiente, con la razón.
+   - Lo más grande es la cobertura de los FR **Must**.
+2. **Producto simulado en `examples/`.** Todavía no existe. Es un proyecto mínimo que hace lo que hará un producto real, siguiendo solo la parte 2 de este documento:
+   - su propio `docker-compose.yml`, unido a `email-service-net`;
+   - un `.env` con `EMAIL_SERVICE_URL` y `EMAIL_SERVICE_API_KEY`, más un `.env.example` versionado;
+   - sus plantillas en su propia carpeta, publicadas con `publish-template.sh` por ruta;
+   - envíos con `Idempotency-Key` derivada de un evento de dominio (`07`): uno simple, uno por lote y uno con `sendAt`;
+   - lectura del estado con `GET /v1/emails/{id}`.
 
-**Parte A — se puede hacer en el repositorio, sin decisiones de infraestructura:**
-- **Manifiestos de despliegue genéricos:** el orden `migrate → api → worker`, y las variables por rol con sus valores de producción, salvo los secretos.
-- **Respaldos de PostgreSQL:** script de respaldo cifrado y de restauración, y un ensayo de restauración contra una base desechable.
-- **Lista de `08` §10:** revisar los puntos que se pueden comprobar en código:
-  - escaneo de secretos;
-  - Actuator mínimo;
-  - roles y RLS;
-  - keys de producto sin `templates:write`;
-  - tests de aislamiento.
-- **README de integración en menos de 30 minutos:** partir de la parte 2 de este documento y quitarle lo que es solo local.
-- **Primer producto integrado en local**, de punta a punta, con la red de esta guía.
+   Cuenta como "primer producto integrado en local" y es la prueba de la guía de integración. Debe tener su propio script de prueba de punta a punta, que llegue a Mailpit y simule un evento. Sin lógica de producto real: el servicio no puede conocer a ningún tenant.
+3. **Guía de prueba de extremo a extremo con Resend real.** El README tiene las piezas sueltas, pero falta un único procedimiento que las una:
+   - **Piezas que ya existen en el README:**
+     - "Envío real desde staging (Resend)": equipo de Resend, dominio, key y variables;
+     - "Webhooks de Resend en staging": proxy que solo deja pasar `/webhooks/*` y túnel temporal de `cloudflared`;
+     - las direcciones de prueba `delivered@resend.dev`, `bounced@resend.dev` y `complained@resend.dev`.
+   - **Lo que tiene que cubrir el procedimiento,** paso a paso y desde una máquina de desarrollo:
+     - la app con `APP_ENV=staging` y `MAIL_PROVIDER=resend`, contra el PostgreSQL de compose;
+     - `ALLOWED_RECIPIENT_DOMAINS=resend.dev`;
+     - el túnel, con el endpoint temporal registrado en Resend y su secreto;
+     - un envío a cada dirección `@resend.dev`, comprobando el estado (`DELIVERED`, `BOUNCED`, `COMPLAINED`) y las supresiones globales;
+     - la limpieza: túnel, endpoint y supresiones de prueba.
+   - **Para ejecutarlo** hace falta la cuenta de Resend de staging (parte B), pero el documento se puede escribir y revisar antes.
+   - Sigue sin enviar nunca a direcciones reales, y los tests siguen sin llamar a Resend.
+4. **Manifiestos de despliegue genéricos:**
+   - el orden `migrate → api → worker`;
+   - las variables por rol con sus valores de producción, salvo los secretos;
+   - sin elegir todavía proveedor de hosting.
+5. **Respaldos de PostgreSQL:**
+   - script de respaldo cifrado y de restauración;
+   - un ensayo de restauración contra una base desechable, que quede como test o como procedimiento repetible.
+6. **Lista de `08` §10, solo los puntos que se comprueban en código:**
+   - escaneo de secretos;
+   - Actuator mínimo: hoy `/actuator/health` muestra los componentes; hay que revisar qué se expone fuera de local;
+   - roles y RLS;
+   - keys de producto sin `templates:write` ni `suppressions:write`;
+   - tests de aislamiento.
+7. **README de integración en menos de 30 minutos:** la parte 2 de este documento sin lo que es solo local, probado con el producto simulado del punto 2.
 
-**Parte B — necesita las decisiones del owner de abajo:**
-- **Dominio remitente** con SPF, DKIM y DMARC verificados en Resend.
-- **Hosting:**
-  - PostgreSQL gestionado o propio, con respaldo cifrado activo;
-  - **restauración probada una vez**;
-  - TLS, y solo `/webhooks/*` público.
-- **Secretos en un gestor:**
-  - `ADMIN_API_KEYS`;
-  - `SUPPRESSION_HASH_KEY`, con respaldo fuera de línea;
-  - `RESEND_API_KEY`;
-  - `MAIL_WEBHOOK_SIGNING_SECRET`;
-  - contraseñas de BD.
-- **Cuentas de Resend:**
-  - equipos distintos para staging y producción;
-  - endpoint de webhooks registrado;
-  - firma verificada con un evento real.
-- **Staging desplegado**, con NFR-19 medido allí (aceptación → `SENT`, p95 ≤ 5 s).
-- **Alertas** conectadas al hosting de logs (campo `alert`, README).
-- **Producción desplegada** y el primer producto enviando de verdad.
+### H9 (Producción), parte B: lo que espera decisiones del owner
 
-### Qué falta para cerrar la Fase 0 (`09`)
+Cada ítem depende de una decisión de la lista siguiente.
 
-| Criterio | Estado |
+| Ítem | Depende de |
 |---|---|
-| Un producto real en producción envía sus correos por el servicio | Pendiente (H9 parte B) |
-| `docker compose up` desde un clon limpio envía a Mailpit sin credenciales externas | Hecho (`scripts/smoke-test.sh`) |
-| FR **Must** con sus criterios cubiertos por tests | Hecho hasta H8 |
-| Tests de aislamiento multi-tenant, sin contexto (RLS) y de FK cruzada | Hecho |
-| Con el proveedor caído, la API acepta y la cola se drena al recuperarlo | Hecho (tests de H5) |
-| Test de "respuesta perdida": un solo envío en el proveedor simulado | Hecho (H5) |
-| NFR-19 medido en staging | Pendiente: no hay staging |
-| Lista de `08` §10 completa | Pendiente (H9 A y B) |
-| README con guía de integración en < 30 minutos | Pendiente (H9 A); esta guía es la base |
+| Dominio remitente por producto, con SPF, DKIM y DMARC verificados en Resend | Dominio |
+| Equipos de Resend de staging y producción; endpoint de webhooks registrado y firma verificada con un evento real | Cuentas de Resend, dominio, hosting |
+| Secretos cargados en el gestor: `ADMIN_API_KEYS`, `SUPPRESSION_HASH_KEY` (con respaldo fuera de línea), `RESEND_API_KEY`, `MAIL_WEBHOOK_SIGNING_SECRET` y contraseñas de BD | Secretos |
+| Staging desplegado; NFR-19 medido allí (aceptación → `SENT`, p95 ≤ 5 s) | Hosting, cuentas de Resend |
+| Producción desplegada: PostgreSQL con respaldo cifrado activo y **restauración probada una vez**, TLS, y solo `/webhooks/*` público | Hosting, secretos |
+| Alertas conectadas al hosting de logs (campo `alert`, README "Operación") | Hosting |
+| Primer producto real enviando en producción | Todo lo anterior, más los textos legales de ese producto |
 
-### Decisiones pendientes del owner
-
+**Decisiones pendientes del owner:**
 - **Dominio:** qué dominio o subdominio remitente usa cada producto (por ejemplo, `mail.colmena.cr`), y quién gestiona su DNS.
 - **Hosting:**
   - dónde corren `api`, `worker` y PostgreSQL;
@@ -79,16 +104,51 @@ H9 (`09`, `08` §10) se divide en dos partes:
 - **Textos legales** (`08` §6.1 y §10), que bloquean la salida a producción de cada producto, no el desarrollo:
   - el aviso de privacidad de cada producto, que debe cubrir la transferencia al proveedor en EE. UU. (Ley 8968, art. 14);
   - los términos de Colmena con sus negocios.
+- **Propuestas de H7 que siguen sin confirmar:**
+  - AC-23.9: `DELIVERED` cuenta como final a las 72 h, para purgar sus variables;
+  - `03` NFR-11: las alertas `PROVIDER_CONFIGURATION` y `AUTH_FAILURE_SPIKE`, y el mínimo de 20 mensajes para `FAILED_RATE`.
+
+  Están implementadas tal como se propusieron.
+
+### Auditoría de cierre de la Fase 0 (`09`)
+
+Estado al 2026-10-15. "Hecho" solo cuando hay evidencia concreta.
+
+| Criterio de `09` | Estado | Evidencia o qué falta |
+|---|---|---|
+| Un producto real en producción envía sus correos por el servicio | Pendiente | H9 parte B |
+| `docker compose up` desde un clon limpio envía a Mailpit sin credenciales externas | Hecho | `scripts/smoke-test.sh` (AC-15.2), probado el 2026-10-14 |
+| FR **Must** con sus criterios cubiertos por tests | **Por auditar** | Ver la nota siguiente |
+| Tests de aislamiento multi-tenant, sin contexto (RLS) y de FK cruzada | Hecho, a confirmar en la auditoría | `RowLevelSecurityTest`, `SchemaInvariantsTest` y los tests por endpoint de H2–H8; falta comprobar que cada endpoint `/v1/**` tenga el suyo |
+| Con el proveedor caído, la API acepta y la cola se drena al recuperarlo | Hecho, a confirmar en la auditoría | Tests del circuit breaker de H5 (`ResendWorkerTest`); AC-11.2 no tiene un test que lo nombre |
+| Test de "respuesta perdida": un solo envío en el proveedor simulado | Hecho | `ResendWorkerTest` (WireMock) |
+| NFR-19 medido en staging | Pendiente | No hay staging (parte B) |
+| Lista de `08` §10 completa | Pendiente | Parte A, punto 6, y parte B |
+| README con guía de integración en < 30 minutos | Pendiente | Parte A, punto 7 |
+
+**Cobertura de los FR Must:**
+- **Método:** cruce mecánico entre las AC de `02` (las de los FR marcados como Must en la tabla de §1) y las referencias en `src/test/java`: nombres `ac_XX_Y` o comentarios `AC-XX.Y`.
+- **Resultado:** de **150** AC Must, **122** tienen un test que las nombra. Las **28** restantes son: AC-01.4, 02.5, 02.6, 03.6, 05.3, 10.3, 11.1, 11.2, 11.4, 11.5, 12.1, 12.4, 14.1, 14.3, 14.4, 14.5, 14.6, 14.7, 15.2, 15.4, 16.6, 21.6, 23.6, 23.8, 23.9, 29.4, 33.2 y 33.4.
+- **Qué hay que hacer con cada una:** encontrar el test que ya la cubre con otro nombre y referenciarla en él, o escribir el test que falta.
+  - Varias tienen tests probables: por ejemplo, 14.3 y 14.7 con ArchUnit, 21.6 en `BatchAnomalyTest`, 33.2 con `INSUFFICIENT_SCOPE` y 15.2 con el smoke test.
+  - Otras no son verificables con un test, y deben quedar marcadas como tales:
+    - AC-23.6 no aplica, porque FR-30 está rechazado;
+    - AC-23.9 espera la confirmación del owner;
+    - AC-29.4 es un procedimiento de `08` §6;
+    - AC-14.5 es una propiedad de diseño.
+- **Sin evidencia, la AC no se da por cubierta.**
 
 ## Parte 2 — Usar el servicio desde otros proyectos en local
 
 ### 1. Arrancar el servicio
 
-Desde `main`, que siempre es desplegable:
+Desde `main`, que siempre es desplegable (o fijo en un tag: `git switch --detach v0.8.1`):
 
 ```bash
 git switch main && git pull
 cp -n .env.example .env        # solo la primera vez; .env no se versiona
+grep -q '^MAIL_WEBHOOK_SIGNING_SECRET=' .env \
+  || grep '^MAIL_WEBHOOK_SIGNING_SECRET=' .env.example >> .env   # ver la nota de abajo
 docker compose up -d --build
 ```
 
@@ -96,7 +156,11 @@ Contenedores y servicios:
 - `app`, `postgres` y `mailpit` tienen `restart: unless-stopped`: vuelven a arrancar con Docker hasta que los pares con `docker compose stop`.
 - La API queda en `http://localhost:8080`, Mailpit en `http://localhost:8025` y PostgreSQL en `localhost:5432`, todo solo en `127.0.0.1`.
 
-**Si tu `.env` es anterior a esta guía**, añade la línea `MAIL_WEBHOOK_SIGNING_SECRET` de `.env.example`. Sin ella, `/webhooks/resend` responde `404` y no se pueden simular eventos.
+**`MAIL_WEBHOOK_SIGNING_SECRET` en `.env`.** Un `.env` copiado antes de `v0.8.1` no tiene esta variable. La segunda línea del bloque de arriba la copia de `.env.example` solo si falta.
+- Es un secreto **ficticio**, solo para local; gitleaks lo admite por su valor exacto (`.gitleaks.toml`).
+- Sin él, `/webhooks/resend` responde `404` y `scripts/simulate-event.sh` lo indica.
+- Si ya estaba la app levantada, hay que recrearla con `docker compose up -d` para que lo lea.
+- Nunca pongas aquí el secreto de un endpoint real de Resend.
 
 **Datos:**
 - `docker compose down` (sin `-v`) conserva la base.
