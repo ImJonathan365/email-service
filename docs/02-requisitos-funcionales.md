@@ -186,7 +186,7 @@ Requiere el ámbito `templates:write` (FR-33).
 - **AC-07.5** — **(rev. 2026-10)** La API valida las variables **y** renderiza la plantilla de forma síncrona, descartando el resultado (un error de render devuelve `422 TEMPLATE_VARIABLES_INVALID` con el detalle). El worker vuelve a renderizar con la versión fijada al enviar. El resultado no se guarda salvo `storeRenderedContent`.
 - **AC-07.6** — El cuerpo de la petición no puede superar `MAX_REQUEST_BYTES` (default 256 KB) → `413 PAYLOAD_TOO_LARGE`. **(rev. 2026-10)** Un campo `attachments` se rechaza con `422 VALIDATION_ERROR` mientras FR-30 siga en Won't.
 - **AC-07.7** — `cc` y `bcc` admiten hasta 5 direcciones cada uno; `to` es **una sola** dirección (un mensaje = un destinatario principal, para que el estado sea inequívoco).
-- **AC-07.8** — **(rev. 2026-10)** Toda variable con `"format": "uri"` debe usar el esquema `https` y tener un host que coincida con `tenant.allowedLinkHosts` (coincidencia exacta o subdominio de una entrada). Si no, `422 UNSAFE_URL` indicando la variable.
+- **AC-07.8** — **(rev. 2026-10)** Toda variable con `"format": "uri"` debe usar el esquema `https` y tener un host que coincida con `tenant.allowedLinkHosts` (coincidencia exacta o subdominio de una entrada). Si no, `422 UNSAFE_URL` indicando la variable. **(rev. 2026-10-14, ADR-0021)** Solo con `APP_ENV=local` se acepta además `http` o `https` a `localhost` y `*.localhost`; en `staging` y `production` la regla no cambia.
 - **AC-07.9** — **(rev. 2026-10)** *Dado* un tenant en pausa (FR-34), *entonces* `403 TENANT_SENDING_PAUSED` y no se crea mensaje.
 
 ### FR-08 — Idempotencia (Must)

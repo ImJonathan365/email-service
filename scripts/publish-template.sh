@@ -1,36 +1,41 @@
 #!/usr/bin/env bash
-# Publishes a template kept as code in templates/{tenant}/{templateKey}/ (docs/05 §9):
+# Publishes a template kept as code (docs/05 §9). The folder holds:
 #   template.json            key, name, description, category, trackingEnabled, subject per locale,
 #                            variablesSchema and previewVariables
 #   {locale}.html            HTML body per locale (required)
 #   {locale}.txt             plain-text body per locale (optional)
 #
-# Usage: EMAIL_SERVICE_TEMPLATES_KEY=esk_... [BASE_URL=...] scripts/publish-template.sh {tenant} {templateKey}
-# The key needs templates:write and emails:read and must belong to {tenant}. Locales whose content
-# equals the published version are skipped; the others become drafts, are previewed with
-# previewVariables and are published only if every preview succeeds, all locales in one atomic
-# request (ADR-0020).
+# Usage, from any repository (the product keeps its templates in its own repo):
+#   EMAIL_SERVICE_TEMPLATES_KEY=esk_... [EMAIL_SERVICE_URL=http://localhost:8080] \
+#     publish-template.sh path/to/template-folder
+# or, for the examples in this repository: publish-template.sh {tenant} {templateKey}
+# (templates/{tenant}/{templateKey}). Needs curl and jq.
+#
+# The key needs templates:write and emails:read; its tenant is the one the template belongs to.
+# Locales whose content equals the published version are skipped; the others become drafts, are
+# previewed with previewVariables and are published only if every preview succeeds, all locales in
+# one atomic request (ADR-0020).
 set -euo pipefail
-
-cd "$(dirname "$0")/.."
 
 die() {
 	echo "publish-template: $*" >&2
 	exit 1
 }
 
-[[ $# -eq 2 ]] || die "usage: $0 {tenant} {templateKey}"
-TENANT="$1"
-KEY="$2"
-DIR="templates/$TENANT/$KEY"
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+case $# in
+	1) DIR="${1%/}" ;;
+	2) DIR="$(cd "$(dirname "$0")/.." && pwd)/templates/$1/$2" ;;
+	*) die "usage: $0 path/to/template-folder  (or: $0 {tenant} {templateKey})" ;;
+esac
+BASE_URL="${EMAIL_SERVICE_URL:-${BASE_URL:-http://localhost:8080}}"
 API_KEY="${EMAIL_SERVICE_TEMPLATES_KEY:-}"
 
-command -v jq > /dev/null || die "jq is required (it is declared in mise.toml: run 'mise install')"
+command -v jq > /dev/null || die "jq is required"
 [[ -n "$API_KEY" ]] || die "EMAIL_SERVICE_TEMPLATES_KEY is not set"
 [[ -f "$DIR/template.json" ]] || die "$DIR/template.json not found"
 jq -e 'type == "object"' "$DIR/template.json" > /dev/null || die "$DIR/template.json is not a JSON object"
-[[ "$(jq -r .key "$DIR/template.json")" == "$KEY" ]] || die "template.json key does not match the folder name '$KEY'"
+KEY="$(jq -r '.key // empty' "$DIR/template.json")"
+[[ -n "$KEY" ]] || die "template.json has no key"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

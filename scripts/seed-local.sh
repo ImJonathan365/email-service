@@ -1,14 +1,26 @@
 #!/usr/bin/env bash
-# Seeds a local stack (docker compose up) through the admin API: a demo tenant, a product key
-# (emails:send, emails:read) and an operator key (templates:write, suppressions:write, emails:read),
-# then publishes every template under templates/{slug}/ with the operator key (needs jq).
-# Local use only. Keys are printed once and never written to disk; each run issues new keys.
+# Seeds a local stack (docker compose up) through the admin API: a tenant (SLUG, default demo), a
+# product key (emails:send, emails:read) and an operator key (templates:write, suppressions:write,
+# emails:read), then publishes every template under templates/{slug}/ with the operator key.
+#
+# Idempotent: if the tenant already exists it is left as it is and no keys are issued, so the keys
+# a project already stores keep working. --new-keys issues a new pair for an existing tenant (the
+# old keys stay valid until revoked). Keys are printed once and never written to disk.
+# docker compose down -v deletes the database: tenants, keys and templates go with it.
+#
+# Usage: [SLUG=colmena] [EMAIL_SERVICE_URL=http://localhost:8080] scripts/seed-local.sh [--new-keys]
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${EMAIL_SERVICE_URL:-${BASE_URL:-http://localhost:8080}}"
 SLUG="${SLUG:-demo}"
+NEW_KEYS=false
+case "${1:-}" in
+	"") ;;
+	--new-keys) NEW_KEYS=true ;;
+	*) echo "usage: $0 [--new-keys]" >&2; exit 2 ;;
+esac
 
 if [[ -z "${ADMIN_API_KEYS:-}" && -f .env ]]; then
 	ADMIN_API_KEYS="$(grep -E '^ADMIN_API_KEYS=' .env | head -n 1 | cut -d= -f2-)"
@@ -30,13 +42,20 @@ status_of() { tail -n 1 <<<"$1"; }
 body_of() { sed '$d' <<<"$1"; }
 
 response="$(admin POST /admin/v1/tenants "$(cat <<JSON
-{"slug": "$SLUG", "name": "Demo", "fromEmail": "no-reply@demo.localhost", "fromName": "Demo",
- "allowedFromDomains": ["demo.localhost"], "allowedLinkHosts": ["demo.localhost"]}
+{"slug": "$SLUG", "name": "$SLUG", "fromEmail": "no-reply@$SLUG.localhost", "fromName": "$SLUG",
+ "allowedFromDomains": ["$SLUG.localhost"], "allowedLinkHosts": ["$SLUG.localhost"]}
 JSON
 )")"
 case "$(status_of "$response")" in
 	201) echo "Created tenant '$SLUG'." ;;
-	409) echo "Tenant '$SLUG' already exists; issuing new keys." ;;
+	409)
+		if [[ "$NEW_KEYS" != true ]]; then
+			echo "Tenant '$SLUG' already exists: nothing changed and no keys issued; your stored keys still work."
+			echo "Run with --new-keys to issue a new product and operator key."
+			exit 0
+		fi
+		echo "Tenant '$SLUG' already exists; issuing new keys (--new-keys)."
+		;;
 	*) echo "Creating the tenant failed:" >&2; body_of "$response" >&2; exit 1 ;;
 esac
 
@@ -64,6 +83,6 @@ EOF
 
 for dir in templates/"$SLUG"/*/; do
 	[[ -f "$dir/template.json" ]] || continue
-	EMAIL_SERVICE_TEMPLATES_KEY="$operator_key" BASE_URL="$BASE_URL" \
-		./scripts/publish-template.sh "$SLUG" "$(basename "$dir")"
+	EMAIL_SERVICE_TEMPLATES_KEY="$operator_key" EMAIL_SERVICE_URL="$BASE_URL" \
+		./scripts/publish-template.sh "$dir"
 done

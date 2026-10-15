@@ -4,7 +4,7 @@ Microservicio interno de correo **transaccional** para PipeMend, Colmena, Chinam
 
 La fuente de verdad es [`docs/`](docs/README.md). Reglas para asistentes de IA: [`AGENTS.md`](AGENTS.md).
 
-> Estado: hitos H1 (esqueleto), H2 (tenancy), H3 (plantillas), H4 (envío de extremo a extremo con SMTP hacia Mailpit), H5 (proveedor real: Resend, con circuit breaker y límite de tasa) y H6 (eventos: webhooks Svix, estados por precedencia y supresiones). Siguiente: H7 ([`docs/09-roadmap.md`](docs/09-roadmap.md)). La guía de integración para productos se completa en H9.
+> Estado: H1–H8 terminados; H9 (producción) en pausa hasta las decisiones de infraestructura. Estado detallado y **guía para usar el servicio desde otros proyectos en local** (red Docker, un tenant por proyecto, plantillas en el repositorio del producto, eventos simulados): [`docs/12-estado-y-uso-local.md`](docs/12-estado-y-uso-local.md).
 
 ## Arranque local
 
@@ -17,7 +17,15 @@ cp .env.example .env            # solo marcadores locales; .env está en .gitign
 docker compose up --build       # app (APP_ROLE=all) + PostgreSQL 18 con 3 roles + Mailpit
 ./scripts/seed-local.sh         # tenant "demo", una key de producto, una de operador y las plantillas de templates/demo
 ./scripts/smoke-test.sh         # POST /v1/emails -> cola -> worker -> SMTP -> Mailpit, verificado por su API
+./scripts/simulate-event.sh <messageId> delivered   # evento de Resend simulado y firmado (bounced, complained, delayed)
 ```
+
+Comportamiento del seed y de los datos:
+- El seed es idempotente: si el tenant ya existe no cambia nada ni emite keys; `--new-keys` emite un par nuevo.
+- `SLUG=colmena ./scripts/seed-local.sh` crea el tenant de otro proyecto.
+- `docker compose down -v` borra la base: tenants, keys y plantillas incluidos.
+
+Otros proyectos en Docker se conectan por la red `email-service-net` en `http://email-service:8080` ([`docs/12`](docs/12-estado-y-uso-local.md)).
 
 | URL | Qué es |
 |---|---|
@@ -171,6 +179,10 @@ templates/{tenant}/{templateKey}/
 
 ```bash
 EMAIL_SERVICE_TEMPLATES_KEY=esk_test_... ./scripts/publish-template.sh demo password-reset
+
+# Desde el repositorio de un producto, con la carpeta de su plantilla:
+EMAIL_SERVICE_TEMPLATES_KEY=esk_test_... EMAIL_SERVICE_URL=http://localhost:8080 \
+  ../email-service/scripts/publish-template.sh emails/password-reset
 ```
 
 El script:

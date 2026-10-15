@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.emailservice.common.api.ApiException;
 import com.emailservice.common.api.ErrorCode;
 import com.emailservice.common.api.Problem.FieldError;
+import com.emailservice.common.config.AppEnv;
+import com.emailservice.common.config.AppProperties;
 import com.emailservice.templates.engine.TemplateEngine;
 import com.emailservice.templates.schema.UrlPolicy;
 import com.emailservice.templates.schema.VariablesSchema;
@@ -39,12 +41,15 @@ class TemplatePreviewService {
 
 	private final JsonMapper jsonMapper;
 
+	private final AppEnv env;
+
 	TemplatePreviewService(TemplateRepository templates, TemplateService templateService, TemplateEngine engine,
-			JsonMapper jsonMapper) {
+			JsonMapper jsonMapper, AppProperties properties) {
 		this.templates = templates;
 		this.templateService = templateService;
 		this.engine = engine;
 		this.jsonMapper = jsonMapper;
+		this.env = properties.env();
 	}
 
 	@Transactional(readOnly = true)
@@ -62,7 +67,7 @@ class TemplatePreviewService {
 				throw new ApiException(ErrorCode.TEMPLATE_VARIABLES_INVALID, "The variables do not match the template.",
 						invalid);
 			}
-			List<FieldError> unsafe = UrlPolicy.check(schema, variables, tenant.allowedLinkHosts());
+			List<FieldError> unsafe = UrlPolicy.check(schema, variables, tenant.allowedLinkHosts(), env);
 			if (!unsafe.isEmpty()) {
 				throw new ApiException(ErrorCode.UNSAFE_URL, "URL variables must be https on an allowed host.", unsafe);
 			}

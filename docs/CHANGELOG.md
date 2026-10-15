@@ -2,6 +2,25 @@
 
 Registro de avance y decisiones. Formato: hecho / pendiente / decisiones.
 
+## 2026-10-14 — Uso local desde otros proyectos (H9 en pausa)
+
+- **Hecho** (rama `feat/local-dev-integration`, no es un hito de `09`):
+  - **Red Docker estable:** `email-service-net` con nombre fijo y alias `email-service` para la app; `restart: unless-stopped` en app, PostgreSQL y Mailpit.
+  - **Seed idempotente:**
+    - si el tenant existe, no cambia nada ni emite keys, y lo dice;
+    - `--new-keys` emite un par nuevo;
+    - `SLUG` elige el tenant;
+    - documentado que `down -v` borra la base.
+  - **ADR-0021 (owner):** con `APP_ENV=local` y solo entonces, las variables URL aceptan `http`/`https` hacia `localhost` y `*.localhost`. Sin interruptor propio: imposible en `staging` y `production`. Tests de los dos casos (`UrlPolicyTest`, `EmailAcceptanceTest`).
+  - **`scripts/simulate-event.sh`:**
+    - evento de Resend firmado con Svix y el secreto local de `.env.example` (`MAIL_WEBHOOK_SIGNING_SECRET`, que compose pasa a la app);
+    - mismo camino que un webhook real;
+    - `SimulateEventScriptTest` ejecuta el script contra el servicio de test: estados, supresiones globales, firma ajena rechazada.
+  - **`publish-template.sh`** acepta la ruta de una carpeta de plantilla y funciona desde cualquier repositorio con `EMAIL_SERVICE_URL` (`BASE_URL` sigue valiendo). `templates/demo` queda como ejemplo.
+  - **`docs/12-estado-y-uso-local.md`:** estado (hitos, H9 en partes A y B, Fase 0, decisiones pendientes) y guía de uso local.
+  - **gitleaks:** `.gitleaks.toml` exime solo el valor exacto del secreto local ficticio; cualquier otro secreto se sigue detectando.
+- **Pendiente:** H9, a la espera de las decisiones de infraestructura del owner (`12`, parte 1).
+
 ## 2026-10-13 — H8, parte 2: envío por lote (H8 completo)
 
 - **Hecho:** `POST /v1/emails/batch` (FR-35).

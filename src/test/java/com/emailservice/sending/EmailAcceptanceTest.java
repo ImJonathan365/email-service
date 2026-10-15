@@ -130,6 +130,14 @@ class EmailAcceptanceTest extends IntegrationTest {
 		assertThat(response.body()).contains("\"code\":\"UNSAFE_URL\"").contains("\"field\":\"variables.resetUrl\"");
 	}
 
+	/** ADR-0021: these tests run with APP_ENV=local; UrlPolicyTest covers that no other environment allows it. */
+	@Test
+	void adr_0021_withAppEnvLocalALinkToTheDevelopersMachineIsAccepted() throws Exception {
+		HttpResponse<String> response = a.send(
+				a.body("").replace("https://app.example.test", "http://colmena.localhost:3000"), null);
+		assertThat(response.statusCode()).as(response.body()).isEqualTo(202);
+	}
+
 	@Test
 	void ac_07_5_aVariableThatBreaksTheRenderIsRejected() throws Exception {
 		String key = "money-" + UUID.randomUUID().toString().substring(0, 8);
