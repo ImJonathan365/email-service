@@ -1,6 +1,6 @@
 # Default gitleaks rules, plus one narrow exception: the fictional local-development webhook secret
 # in .env.example, by its exact value. Any other secret, in any file, is still reported.
-# The single [allowlist] table, not [[allowlists]], because the CI action pins an older gitleaks.
+# The single [allowlist] table, not [[allowlists]]: older gitleaks versions ignore the newer form.
 [extend]
 useDefault = true
 
