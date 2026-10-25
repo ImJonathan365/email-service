@@ -533,7 +533,7 @@
             "type" : "string"
           },
           "fromName" : {
-            "example" : "Pulpería La Esquina vía Colmena",
+            "example" : "Café Aurora via Acme",
             "type" : "string"
           },
           "locale" : {
@@ -777,7 +777,7 @@
             "type" : "string"
           },
           "subjectTemplate" : {
-            "example" : "{{firstName}}, restablece tu contraseña",
+            "example" : "{{firstName}}, reset your password",
             "maxLength" : 500,
             "minLength" : 0,
             "type" : "string"
@@ -846,7 +846,7 @@
     }
   },
   "info" : {
-    "description" : "Internal transactional email service. See docs/07-api-interna.md.",
+    "description" : "Internal transactional email service. See docs/07-internal-api.md.",
     "title" : "email-service",
     "version" : "v1"
   },

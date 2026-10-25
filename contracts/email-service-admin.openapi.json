@@ -539,7 +539,7 @@
     }
   },
   "info" : {
-    "description" : "Internal transactional email service. See docs/07-api-interna.md.",
+    "description" : "Internal transactional email service. See docs/07-internal-api.md.",
     "title" : "email-service",
     "version" : "v1"
   },

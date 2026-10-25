@@ -20,7 +20,7 @@ class OpenApiConfig {
 		return new OpenAPI()
 			.info(new Info().title("email-service")
 				.version("v1")
-				.description("Internal transactional email service. See docs/07-api-interna.md."))
+				.description("Internal transactional email service. See docs/07-internal-api.md."))
 			// A fixed relative server keeps the exported contract independent of host and port (AC-25.2).
 			.servers(List.of(new Server().url("/")))
 			.components(new Components()

@@ -34,7 +34,7 @@ public final class TemplateViews {
 	/** Body to create or replace a draft version (AC-04.2). */
 	public record VersionContent(
 			@Schema(example = "es-CR") String locale,
-			@Schema(example = "{{firstName}}, restablece tu contraseña") @NotBlank @Size(max = 500) String subjectTemplate,
+			@Schema(example = "{{firstName}}, reset your password") @NotBlank @Size(max = 500) String subjectTemplate,
 			@NotBlank String htmlTemplate,
 			String textTemplate,
 			@Schema(type = "object") JsonNode variablesSchema) {

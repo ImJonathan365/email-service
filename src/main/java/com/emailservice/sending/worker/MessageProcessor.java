@@ -226,7 +226,7 @@ class MessageProcessor {
 		switch (ex.kind()) {
 			case CONFIGURATION -> {
 				// Every message would fail the same way: stop sending at once, and do not let the
-				// broken setup burn attempts (docs/05 §4, "Configuración").
+				// broken setup burn attempts (docs/05 §4, "Configuration").
 				breaker.onConfigurationError();
 				configurationError(ex.providerError());
 				alerts.raise("PROVIDER_CONFIGURATION", String.valueOf(ex.providerError()), "The provider rejected our own "
