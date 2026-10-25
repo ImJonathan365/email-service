@@ -1,5 +1,5 @@
 # Reference Prometheus rules for the NFR-11 alerts (owner, 2026-10-12). Not deployed in the MVP:
-# there the alerts are the structured ERROR log lines with the "alert" field (README, "Alertas").
+# there the alerts are the structured ERROR log lines with the "alert" field (README, "Operations: alerts, health and data").
 # Each rule here mirrors one value of that field, for when metrics are scraped (roadmap, phase 1).
 groups:
   - name: email-service

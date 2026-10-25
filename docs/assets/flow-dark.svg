@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="275" viewBox="0 0 1000 275" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title>How a message flows through email-service</title>
+<defs>
+<marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4493f8"/></marker>
+<marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#656c76"/></marker>
+</defs>
+<text x="20" y="30" font-size="15" font-weight="600" fill="#f0f6fc">Accept fast, send later, track what happens</text>
+<rect x="20" y="62" width="160" height="96" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1.5"/>
+<text x="100" y="92" text-anchor="middle" font-size="15" font-weight="600" fill="#f0f6fc">Your application</text>
+<text x="100" y="117" text-anchor="middle" font-size="12" fill="#9198a1">POST /v1/emails</text>
+<text x="100" y="135" text-anchor="middle" font-size="12" fill="#9198a1">with an Idempotency-Key</text>
+<rect x="220" y="62" width="160" height="96" rx="10" fill="#0d2a4a" stroke="#4493f8" stroke-width="1.5"/>
+<text x="300" y="92" text-anchor="middle" font-size="15" font-weight="600" fill="#f0f6fc">API</text>
+<text x="300" y="117" text-anchor="middle" font-size="12" fill="#9198a1">auth, validation,</text>
+<text x="300" y="135" text-anchor="middle" font-size="12" fill="#9198a1">render check → 202</text>
+<rect x="420" y="62" width="160" height="96" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1.5"/>
+<text x="500" y="92" text-anchor="middle" font-size="15" font-weight="600" fill="#f0f6fc">PostgreSQL</text>
+<text x="500" y="117" text-anchor="middle" font-size="12" fill="#9198a1">email_message</text>
+<text x="500" y="135" text-anchor="middle" font-size="12" fill="#9198a1">is the queue (RLS)</text>
+<rect x="620" y="62" width="160" height="96" rx="10" fill="#0d2a4a" stroke="#4493f8" stroke-width="1.5"/>
+<text x="700" y="92" text-anchor="middle" font-size="15" font-weight="600" fill="#f0f6fc">Worker</text>
+<text x="700" y="117" text-anchor="middle" font-size="12" fill="#9198a1">claims by priority,</text>
+<text x="700" y="135" text-anchor="middle" font-size="12" fill="#9198a1">SKIP LOCKED + lock_token</text>
+<rect x="820" y="62" width="160" height="96" rx="10" fill="#151b23" stroke="#3d444d" stroke-width="1.5"/>
+<text x="900" y="92" text-anchor="middle" font-size="15" font-weight="600" fill="#f0f6fc">Resend</text>
+<text x="900" y="117" text-anchor="middle" font-size="12" fill="#9198a1">Idempotency-Key =</text>
+<text x="900" y="135" text-anchor="middle" font-size="12" fill="#9198a1">message.id → inbox</text>
+<line x1="184" y1="110" x2="216" y2="110" stroke="#4493f8" stroke-width="2" marker-end="url(#a)"/>
+<text x="200" y="100" text-anchor="middle" font-size="11" fill="#9198a1">HTTPS</text>
+<line x1="384" y1="110" x2="416" y2="110" stroke="#4493f8" stroke-width="2" marker-end="url(#a)"/>
+<text x="400" y="100" text-anchor="middle" font-size="11" fill="#9198a1">enqueue</text>
+<line x1="584" y1="110" x2="616" y2="110" stroke="#4493f8" stroke-width="2" marker-end="url(#a)"/>
+<text x="600" y="100" text-anchor="middle" font-size="11" fill="#9198a1">claim</text>
+<line x1="784" y1="110" x2="816" y2="110" stroke="#4493f8" stroke-width="2" marker-end="url(#a)"/>
+<text x="800" y="100" text-anchor="middle" font-size="11" fill="#9198a1">send</text>
+<path d="M900,162 V210 H324 V168" fill="none" stroke="#4493f8" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a)"/>
+<text x="612" y="200" text-anchor="middle" font-size="12" fill="#f0f6fc">delivery events: signed webhook (Svix) → state and suppressions</text>
+<path d="M100,162 V250 H276 V168" fill="none" stroke="#656c76" stroke-width="1.5" marker-end="url(#g)"/>
+<text x="290" y="254" font-size="12" fill="#9198a1">GET /v1/emails/{id}: state and event history</text>
+</svg>

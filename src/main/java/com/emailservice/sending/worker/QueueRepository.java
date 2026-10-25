@@ -205,7 +205,7 @@ class QueueRepository {
 	/**
 	 * Hands a message back to the queue without counting the attempt, when nothing was wrong with
 	 * the message itself: its tenant became held after the claim (AC-02.3), or the provider setup
-	 * is broken (docs/05 §4, "Configuración"). The 23 h window still runs from the first attempt.
+	 * is broken (docs/05 §4, "Configuration"). The 23 h window still runs from the first attempt.
 	 */
 	boolean release(Claimed message, String code) {
 		return jdbc.sql("""

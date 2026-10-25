@@ -1,178 +1,270 @@
-# email-service
+<h1 align="center">email-service</h1>
 
-Microservicio interno de correo **transaccional** para PipeMend, Colmena, Chinamo y Payverica. Es un único servicio multi-tenant con aislamiento por RLS en PostgreSQL, plantillas por producto, envío asíncrono y trazabilidad. No es una plataforma de marketing.
+<p align="center">
+  A self-hosted, multi-tenant service for <b>transactional</b> email.<br>
+  One HTTP API for your applications; templates, queueing, delivery and tracking behind it.
+</p>
 
-La fuente de verdad es [`docs/`](docs/README.md). Reglas para asistentes de IA: [`AGENTS.md`](AGENTS.md).
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#running-locally">Running locally</a> ·
+  <a href="#templates-as-code">Templates</a> ·
+  <a href="docs/README.md">Design docs</a> ·
+  <a href="contracts/email-service.openapi.json">API contract</a>
+</p>
 
-> Estado: H1–H8 terminados; H9 (producción) en pausa hasta las decisiones de infraestructura. Estado detallado y **guía para usar el servicio desde otros proyectos en local** (red Docker, un tenant por proyecto, plantillas en el repositorio del producto, eventos simulados): [`docs/12-estado-y-uso-local.md`](docs/12-estado-y-uso-local.md).
+Password resets, verification links, receipts, notifications: applications call one HTTP API. The service validates and renders the email from a versioned template, queues it in PostgreSQL, sends it through an email provider and tracks what happens to it afterwards. It is not a marketing or bulk-email platform.
 
-## Arranque local
+The design documentation lives in [`docs/`](docs/README.md) and is the source of truth. Rules for AI assistants are in [`AGENTS.md`](AGENTS.md). Project status and a guide for using the service from other projects in local development: [`docs/12-status-and-local-use.md`](docs/12-status-and-local-use.md).
 
-Requisitos:
-- Docker con Compose;
-- para los tests y los scripts: Java 25 y `jq`, ambos declarados en [`mise.toml`](mise.toml) (`mise install`).
+## What it does
+
+- **One service, many tenants.** Each application is a tenant with its own:
+  - API keys, with scopes;
+  - sender identity and allowed domains;
+  - templates;
+  - rate limits and quotas.
+
+  Isolation is enforced twice: every query filters by `tenant_id`, and PostgreSQL Row Level Security rejects any row outside the current tenant.
+- **Asynchronous sending.** `POST /v1/emails` validates the request, stores the message and answers `202` in milliseconds. A worker sends it later. A slow or unavailable provider never blocks the caller.
+- **Templates kept as code.** Logic-less Handlebars templates are versioned per locale. Published versions are immutable, and each message is pinned to the version it was accepted with. Escaping is context-aware, and URL variables must point to the tenant's own hosts, so a leaked key cannot turn a legitimate template into a phishing link.
+- **No duplicates in practice.**
+  - Clients send an `Idempotency-Key`, unique per tenant in the database.
+  - The worker sends every message to the provider with `Idempotency-Key = message.id`.
+  - Delivery is at least once, and the provider deduplicates retries inside its idempotency window, so a retry does not produce a second email.
+- **Delivery tracking.**
+  - Signed provider webhooks (Svix) move each message through its states: `QUEUED`, `SENDING`, `SENT`, `DELIVERED`, `BOUNCED`, `COMPLAINED`, `FAILED` or `CANCELED`.
+  - Precedence rules keep late or out-of-order events from moving a message backwards.
+- **Suppression.**
+  - Hard bounces, complaints and provider suppressions block an address for every tenant.
+  - Manual suppressions apply to one tenant.
+  - `to`, `cc` and `bcc` are all checked.
+- **Protection and operations:**
+  - per-tenant rate limits and daily quotas;
+  - automatic pause on volume, bounce or complaint anomalies;
+  - alerts as structured log lines, health indicators and metrics;
+  - retention purges and data-subject erasure.
+- **Batch and scheduled sending.**
+  - Up to 100 emails per request, each item judged on its own.
+  - `sendAt` up to 30 days ahead, and a queued message can be cancelled.
+
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/flow-dark.svg">
+  <img alt="Your application calls the API, which validates the request and enqueues the message in PostgreSQL. A worker claims it and sends it through Resend. Resend reports delivery events back to the API through a signed webhook, and the application reads the state with GET /v1/emails/{id}." src="docs/assets/flow-light.svg" width="100%">
+</picture>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Where</th><th>What happens</th><th>Message state</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td><b>Your application</b></td>
+      <td><code>POST /v1/emails</code> with a template key, the recipient, the variables and an <code>Idempotency-Key</code> derived from the event that caused the email.</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>2</td><td><b>API</b></td>
+      <td>Authenticates the key and its scopes, checks idempotency, validates the variables and links, renders the template once as a check, applies suppressions and the rate limit, and stores the message. It answers <code>202</code> without calling the provider.</td>
+      <td><code>QUEUED</code></td>
+    </tr>
+    <tr>
+      <td>3</td><td><b>Worker</b></td>
+      <td>Claims due messages by priority in a short transaction, renders the pinned template version and sends it with <code>Idempotency-Key = message.id</code>. A transient failure is retried with backoff.</td>
+      <td><code>SENDING</code> → <code>SENT</code></td>
+    </tr>
+    <tr>
+      <td>4</td><td><b>Resend → API</b></td>
+      <td>Signed webhooks report what happened. Precedence rules keep late events from moving a message backwards; bounces and complaints suppress the address for every tenant.</td>
+      <td><code>DELIVERED</code>, <code>BOUNCED</code>, <code>COMPLAINED</code> or <code>FAILED</code></td>
+    </tr>
+    <tr>
+      <td>5</td><td><b>Your application</b></td>
+      <td><code>GET /v1/emails/{id}</code> returns the state and the event history. A queued message can still be cancelled.</td>
+      <td><code>CANCELED</code> if cancelled while queued</td>
+    </tr>
+  </tbody>
+</table>
+
+- **One artifact, several roles.** One deployable runs as `APP_ROLE=api`, `worker`, `all` or `migrate`, against one PostgreSQL database. There is no broker, cache or second service.
+- **The queue is a table.**
+  - Workers claim messages with `SELECT … FOR UPDATE SKIP LOCKED` in a short transaction, ordered by priority (`SECURITY` > `TRANSACTIONAL` > `NOTICE`) and then by due time.
+  - They call the provider with no row locks held, and close each message only if they still own its lock.
+  - Retries use backoff, within a 23-hour window.
+- **The provider sits behind a port.** `EmailSender` and `WebhookVerifier` hide the provider:
+  - Resend over its HTTP API outside development;
+  - SMTP to Mailpit for local development only. The application refuses to start with SMTP in production.
+- **Secrets stay out of the database.** They come from environment variables or a secrets manager. The database stores only API key prefixes and SHA-256 hashes.
+
+Stack: Java 25, Spring Boot 4.1 (virtual threads), Spring Data JDBC, Flyway, PostgreSQL 18 and Gradle. The API contract is [`contracts/email-service.openapi.json`](contracts/email-service.openapi.json).
+
+## Running locally
+
+Requirements:
+- Docker with Compose;
+- for the tests and scripts: Java 25 and `jq`, both declared in [`mise.toml`](mise.toml) (`mise install`).
 
 ```bash
-cp .env.example .env            # solo marcadores locales; .env está en .gitignore
-docker compose up --build       # app (APP_ROLE=all) + PostgreSQL 18 con 3 roles + Mailpit
-./scripts/seed-local.sh         # tenant "demo", una key de producto, una de operador y las plantillas de templates/demo
-./scripts/smoke-test.sh         # POST /v1/emails -> cola -> worker -> SMTP -> Mailpit, verificado por su API
-./scripts/simulate-event.sh <messageId> delivered   # evento de Resend simulado y firmado (bounced, complained, delayed)
+cp .env.example .env            # local placeholders only; .env is git-ignored
+docker compose up --build       # app (APP_ROLE=all) + PostgreSQL 18 with 3 roles + Mailpit
+./scripts/seed-local.sh         # tenant "demo", a product key, an operator key and the templates in templates/demo
+./scripts/smoke-test.sh         # POST /v1/emails -> queue -> worker -> SMTP -> Mailpit, checked through its API
+./scripts/simulate-event.sh <messageId> delivered   # simulated, signed Resend event (or bounced, complained, delayed)
 ```
 
-Comportamiento del seed y de los datos:
-- El seed es idempotente: si el tenant ya existe no cambia nada ni emite keys; `--new-keys` emite un par nuevo.
-- `SLUG=colmena ./scripts/seed-local.sh` crea el tenant de otro proyecto.
-- `docker compose down -v` borra la base: tenants, keys y plantillas incluidos.
+Seed and data behaviour:
+- The seed is idempotent. If the tenant already exists, it changes nothing and issues no keys; `--new-keys` issues a new pair.
+- `SLUG=my-app ./scripts/seed-local.sh` creates a tenant for another application.
+- `docker compose down -v` deletes the database, including tenants, keys and templates.
 
-Otros proyectos en Docker se conectan por la red `email-service-net` en `http://email-service:8080` ([`docs/12`](docs/12-estado-y-uso-local.md)).
+Applications running in Docker reach the service at `http://email-service:8080` through the `email-service-net` network ([`docs/12`](docs/12-status-and-local-use.md)).
 
-| URL | Qué es |
+| URL | What it is |
 |---|---|
-| http://localhost:8080/swagger-ui.html | Swagger UI (grupos `public` y `admin`) |
-| http://localhost:8080/actuator/health/readiness | Readiness (depende solo de la BD) |
-| http://localhost:8025 | Mailpit (SMTP de desarrollo; no entrega nada fuera) |
+| http://localhost:8080/swagger-ui.html | Swagger UI (`public` and `admin` groups) |
+| http://localhost:8080/actuator/health/readiness | Readiness (depends on the database only) |
+| http://localhost:8025 | Mailpit (development SMTP; delivers nothing outside) |
 
-Tests: `./gradlew build` (necesita Docker: Testcontainers con los mismos roles y RLS que producción).
+Tests: `./gradlew build`. They need Docker, because Testcontainers runs PostgreSQL with the same roles and RLS as production. The tests never send a real email: the provider is stubbed with WireMock.
 
-## Envío real desde staging (Resend)
+## Sending through Resend from staging
 
-En local se envía siempre por SMTP a Mailpit. Resend se usa a partir de staging (ADR-0016). La cuenta la prepara el owner; el servicio solo necesita las variables.
+Local development always sends over SMTP to Mailpit. Resend is used from staging onwards (ADR-0016). The Resend account is prepared by the owner; the service only needs the variables.
 
-1. **Equipo de Resend para staging,** separado del de producción. Así una key o un dominio de staging nunca afectan a la reputación de producción.
-2. **Dominio remitente:** en *Domains → Add domain*, un subdominio propio (p. ej. `mail-staging.<dominio>`). Publica en el DNS los registros que muestra Resend:
-   - **SPF:** el `TXT` y el `MX` del subdominio de rebotes (`send.…`);
-   - **DKIM:** el `TXT` `resend._domainkey…`;
-   - **DMARC:** Resend no lo crea. Añade `_dmarc.<subdominio>` `TXT "v=DMARC1; p=none; rua=mailto:<buzón>"` y endurécelo (`quarantine` / `reject`) cuando los informes estén limpios.
+1. **A Resend team for staging,** separate from production, so a staging key or domain never affects production's reputation.
+2. **Sender domain:** in *Domains → Add domain*, add a subdomain of your own (for example `mail-staging.<domain>`). Publish the DNS records Resend shows:
+   - **SPF:** the `TXT` and `MX` records of the bounce subdomain (`send.…`);
+   - **DKIM:** the `TXT` record `resend._domainkey…`;
+   - **DMARC:** Resend does not create it. Add `_dmarc.<subdomain>` `TXT "v=DMARC1; p=none; rua=mailto:<mailbox>"`, and tighten it (`quarantine` / `reject`) once the reports are clean.
 
-   Espera a que el dominio aparezca como **Verified**.
-3. **API key:** en *API Keys → Create*, con permiso **Sending access** y limitada a ese dominio. Se muestra una sola vez: guárdala directamente en el gestor de secretos de staging.
-4. **Variables del despliegue de staging** (gestor de secretos, nunca en el repositorio):
+   Wait until the domain shows as **Verified**.
+3. **API key:** in *API Keys → Create*, with **Sending access**, restricted to that domain. It is shown once: store it straight in the staging secrets manager.
+4. **Staging deployment variables** (secrets manager, never the repository):
 
-   | Variable | Valor |
+   | Variable | Value |
    |---|---|
    | `APP_ENV` | `staging` |
    | `MAIL_PROVIDER` | `resend` |
-   | `RESEND_API_KEY` | la key del paso 3 (secreto) |
-   | `ALLOWED_RECIPIENT_DOMAINS` | dominios de destino permitidos en staging (obligatoria) |
-   | `WORKER_PROVIDER_RPS` | límite de peticiones por segundo de la cuenta de Resend dividido entre el número de instancias de worker |
-   | `CIRCUIT_BREAKER_FAILURES` / `CIRCUIT_BREAKER_OPEN_SECONDS` | `5` / `60` (por defecto) |
+   | `RESEND_API_KEY` | the key from step 3 (secret) |
+   | `ALLOWED_RECIPIENT_DOMAINS` | recipient domains allowed in staging (required) |
+   | `WORKER_PROVIDER_RPS` | the Resend account's requests-per-second limit divided by the number of worker instances |
+   | `CIRCUIT_BREAKER_FAILURES` / `CIRCUIT_BREAKER_OPEN_SECONDS` | `5` / `60` (defaults) |
 
-   `RESEND_API_URL` solo se cambia para pruebas contra un stub, y fuera de `local` debe ser `https`.
-5. **Tenant:** su `fromEmail` debe usar el dominio verificado, que también va en `allowedFromDomains`:
+   `RESEND_API_URL` changes only for tests against a stub, and outside `local` it must be `https`.
+5. **Tenant:** its `fromEmail` must use the verified domain, which also goes in `allowedFromDomains`:
    ```bash
    curl -X PATCH "$BASE/admin/v1/tenants/demo" -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
-     -d '{"fromEmail": "no-reply@mail-staging.<dominio>", "allowedFromDomains": ["mail-staging.<dominio>"]}'
+     -d '{"fromEmail": "no-reply@mail-staging.<domain>", "allowedFromDomains": ["mail-staging.<domain>"]}'
    ```
 
-**Qué pasa si algo está mal configurado** (docs/05 §4):
-- **Key revocada o sin permiso** (`401`, `403` de la key, `404`/`405`):
-  - el circuit breaker se abre al primer error y nadie consume intentos;
-  - suben el log de error y `email_provider_config_error_total{error}`;
-  - tras corregir la key, el siguiente sondeo (60 s) reanuda el envío;
-  - los mensajes caducan a las 23 h de su primer intento (`RETRY_WINDOW_EXCEEDED`).
-- **Dominio no verificado** (`403 validation_error`):
-  - solo ese tenant queda en pausa (`pause_reason = PROVIDER_DOMAIN`, auditado);
-  - sus mensajes siguen `QUEUED` y la API responde `403 TENANT_SENDING_PAUSED`;
-  - tras verificar el dominio, se reanuda con:
+**When something is misconfigured** (docs/05 §4):
+- **Revoked key or missing permission** (`401`, a key-related `403`, `404`/`405`):
+  - the circuit breaker opens on the first error, and no message uses up attempts;
+  - an error log and `email_provider_config_error_total{error}` go up;
+  - once the key is fixed, the next probe (60 s) resumes sending;
+  - messages expire 23 h after their first attempt (`RETRY_WINDOW_EXCEEDED`).
+- **Unverified domain** (`403 validation_error`):
+  - only that tenant is paused (`pause_reason = PROVIDER_DOMAIN`, audited);
+  - its messages stay `QUEUED`, and the API answers `403 TENANT_SENDING_PAUSED`;
+  - once the domain is verified, resume it with:
   ```bash
   curl -X POST "$BASE/admin/v1/tenants/demo/resume-sending" -H "X-Admin-Key: $ADMIN_KEY" \
-    -H 'Content-Type: application/json' -d '{"note": "dominio verificado en Resend"}'
+    -H 'Content-Type: application/json' -d '{"note": "domain verified in Resend"}'
   ```
 
-**Prueba manual (opcional).** Envía un correo real a un buzón tuyo, dentro de `ALLOWED_RECIPIENT_DOMAINS`:
+**Manual test (optional).** Send a real email to a mailbox of your own, within `ALLOWED_RECIPIENT_DOMAINS`:
 ```bash
 curl -X POST "$BASE/v1/emails" -H "Authorization: Bearer $PRODUCT_KEY" -H 'Content-Type: application/json' \
   -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"templateKey": "<plantilla publicada>", "to": {"email": "<tu buzón>"}, "variables": {...}}'
+  -d '{"templateKey": "<published template>", "to": {"email": "<your mailbox>"}, "variables": {...}}'
 ```
-Comprueba lo siguiente:
-- la respuesta es `202` con el `id` del mensaje;
-- en *Emails* de Resend aparece el envío con la etiqueta `message_id=<id>`;
-- en la base, el mensaje pasa a `SENT` con `provider_message_id`.
+Check that:
+- the response is `202` with the message `id`;
+- the email shows up in Resend's *Emails* with the tag `message_id=<id>`;
+- in the database, the message moves to `SENT` with a `provider_message_id`.
 
-Los tests nunca llaman a Resend: usan WireMock en local.
+## Resend webhooks in staging
 
-## Webhooks de Resend en staging
+Events (delivered, bounced, complained, suppressed) arrive at `POST /webhooks/resend`, signed with Svix (FR-16). Resend needs a public HTTPS URL. In staging, the load balancer must expose **only** `/webhooks/*` (docs/05 §7).
 
-Los eventos (entregado, rebote, queja, supresión) llegan a `POST /webhooks/resend`, firmados con Svix (FR-16). Resend necesita una URL pública con HTTPS. En staging, el balanceador debe exponer **solo** `/webhooks/*` (docs/05 §7).
+**Register the endpoint** (in the staging Resend team):
+1. In *Webhooks → Add endpoint*, set the URL to `https://<staging host>/webhooks/resend`.
+2. Select these events: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.failed`, `email.suppressed`, `email.opened`, `email.clicked`, `suppression.added` and `suppression.removed`.
+3. Copy the *Signing secret* (`whsec_…`) straight into the secrets manager as `MAIL_WEBHOOK_SIGNING_SECRET`, and restart the `api` instances. It is required with `MAIL_PROVIDER=resend`: without it, the API does not start.
+4. **Rotation** (docs/08 §1):
+   - create a second endpoint;
+   - set both secrets, comma-separated (`whsec_old,whsec_new`);
+   - delete the old endpoint;
+   - keep only the new secret.
 
-**Registrar el endpoint** (en el equipo de staging de Resend):
-1. En *Webhooks → Add endpoint*, pon la URL `https://<host de staging>/webhooks/resend`.
-2. Marca estos eventos: `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.failed`, `email.suppressed`, `email.opened`, `email.clicked`, `suppression.added` y `suppression.removed`.
-3. Copia el *Signing secret* (`whsec_…`) directamente al gestor de secretos como `MAIL_WEBHOOK_SIGNING_SECRET` y reinicia las instancias `api`. Es obligatorio con `MAIL_PROVIDER=resend`: sin él, la API no arranca.
-4. **Rotación** (docs/08 §1):
-   - crea un segundo endpoint;
-   - pon los dos secretos separados por coma (`whsec_viejo,whsec_nuevo`);
-   - borra el endpoint viejo;
-   - deja solo el nuevo.
-
-**Prueba temporal con un túnel** (antes de que staging tenga host propio). Nunca expongas la aplicación entera: delante del túnel va un proxy que solo deja pasar `/webhooks/*`; `/v1` y `/admin` responden `404`.
+**Temporary test through a tunnel** (before staging has a host of its own). Never expose the whole application: a proxy in front of the tunnel lets only `/webhooks/*` through, and `/v1` and `/admin` answer `404`.
 
 ```bash
-# 1. La app con los valores de staging, desde el host, contra el PostgreSQL de compose.
-#    .env.staging está en .gitignore; contiene APP_ENV=staging, MAIL_PROVIDER=resend, RESEND_API_KEY,
-#    MAIL_WEBHOOK_SIGNING_SECRET, ALLOWED_RECIPIENT_DOMAINS (incluye resend.dev) y las variables de .env.
+# 1. The app with staging values, from the host, against the compose PostgreSQL.
+#    .env.staging is git-ignored; it holds APP_ENV=staging, MAIL_PROVIDER=resend, RESEND_API_KEY,
+#    MAIL_WEBHOOK_SIGNING_SECRET, ALLOWED_RECIPIENT_DOMAINS (including resend.dev) and the variables in .env.
 docker compose up -d postgres
 set -a; source .env.staging; set +a; ./gradlew bootRun
 
-# 2. Proxy que solo reenvía /webhooks/* (otra terminal).
+# 2. A proxy that forwards only /webhooks/* (another terminal).
 printf ':8081 {\n\thandle /webhooks/* {\n\t\treverse_proxy localhost:8080\n\t}\n\trespond 404\n}\n' > /tmp/Caddyfile
 docker run --rm --network host -v /tmp/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2
 
-# 3. Túnel temporal hacia el proxy (otra terminal); imprime una URL https://<aleatorio>.trycloudflare.com
+# 3. A temporary tunnel to the proxy (another terminal); it prints a URL https://<random>.trycloudflare.com
 cloudflared tunnel --url http://localhost:8081
 ```
 
-Después:
-1. Registra `https://<aleatorio>.trycloudflare.com/webhooks/resend` como endpoint (pasos de arriba) y usa su secreto en `.env.staging`.
-2. Envía a las direcciones de prueba de Resend, con la prueba manual de la sección anterior:
-   - `delivered@resend.dev`: el mensaje pasa a `DELIVERED`;
-   - `bounced@resend.dev`: pasa a `BOUNCED` y se crea una supresión global `HARD_BOUNCE`;
-   - `complained@resend.dev`: pasa a `COMPLAINED` y se crea una supresión global `COMPLAINT`.
-3. En *Webhooks → \<endpoint\>* de Resend, cada entrega debe aparecer con `204`. Un `401` indica que el secreto no coincide.
-4. **Al terminar:**
-   - corta el túnel y el proxy (`Ctrl+C`);
-   - borra el endpoint temporal en Resend;
-   - retira las supresiones de prueba con `DELETE /admin/v1/suppressions/{email}`, y también en *Suppressions* de Resend.
+Then:
+1. Register `https://<random>.trycloudflare.com/webhooks/resend` as an endpoint (steps above), and use its secret in `.env.staging`.
+2. Send to Resend's test addresses, with the manual test of the previous section:
+   - `delivered@resend.dev`: the message moves to `DELIVERED`;
+   - `bounced@resend.dev`: it moves to `BOUNCED`, and a global `HARD_BOUNCE` suppression is created;
+   - `complained@resend.dev`: it moves to `COMPLAINED`, and a global `COMPLAINT` suppression is created.
+3. In Resend's *Webhooks → \<endpoint\>*, every delivery should show `204`. A `401` means the secret does not match.
+4. **When done:**
+   - stop the tunnel and the proxy (`Ctrl+C`);
+   - delete the temporary endpoint in Resend;
+   - remove the test suppressions with `DELETE /admin/v1/suppressions/{email}`, and in Resend's *Suppressions* too.
 
-## Operación: alertas, salud y datos
+## Operations: alerts, health and data
 
-**Alertas.** Las alertas de NFR-11 son líneas de log JSON de nivel `ERROR` con el campo `alert`, y `alertSubject` indica a qué se refiere.
-- Una misma alerta para el mismo sujeto se emite como mucho una vez cada 15 minutos por instancia.
-- Para una alerta basada en logs en el hosting, filtra `level = ERROR` y el campo `alert` presente, y agrupa por `alert` y `alertSubject`.
-- `ops/prometheus/alerts.yml` tiene reglas equivalentes de referencia, para cuando las métricas se recojan con Prometheus.
+**Alerts.** The NFR-11 alerts are JSON log lines at level `ERROR` with an `alert` field, and `alertSubject` says what they refer to.
+- The same alert for the same subject is emitted at most once every 15 minutes per instance.
+- For a log-based alert in your hosting, filter on `level = ERROR` with an `alert` field present, and group by `alert` and `alertSubject`.
+- `ops/prometheus/alerts.yml` has equivalent reference rules, for when metrics are collected with Prometheus.
 
-| `alert` | `alertSubject` | Qué significa | Qué hacer |
+| `alert` | `alertSubject` | Meaning | What to do |
 |---|---|---|---|
-| `QUEUE_AGE` | `queue` | El mensaje elegible más viejo espera más de `QUEUE_AGE_ALERT_SECONDS` (300 s) | Mirar si hay workers vivos, el circuit breaker y `/actuator/health` |
-| `FAILED_RATE` | `all-tenants` | Más del 5 % de los mensajes de la última hora están `FAILED` (con al menos 20) | Agrupar por `failure_code` (docs/06 §4) |
-| `TENANT_PAUSED` | slug (o id) del tenant | Pausa automática: volumen, rebotes, quejas (FR-34) o dominio no verificado | Revisar con el producto; reanudar con `POST /admin/v1/tenants/{slug}/resume-sending` |
-| `CIRCUIT_BREAKER_OPEN` | `provider` | El proveedor lleva más de 10 minutos sin aceptar envíos | Estado de Resend; la cola espera sin perder intentos |
-| `PROVIDER_CONFIGURATION` | código de error de Resend | La API key o los permisos están mal (`401`, `403` de la key) | Rotar o corregir `RESEND_API_KEY` |
-| `LOST_LOCK` | `worker` | Un worker perdió el lock de un mensaje antes de cerrarlo | Revisar pausas largas del worker o `LOCK_TIMEOUT_SECONDS` |
-| `IDEMPOTENCY_CONFLICT` | id del mensaje | El proveedor vio el mismo id con otro cuerpo: render no determinista (AC-12.7) | Revisar la plantilla y la versión fijada del mensaje |
-| `COMPLAINT_RATE` | slug del tenant | Tasa de quejas a 7 días por encima de 0,1 % | Revisar contenido y destinatarios del producto antes de que llegue a pausar |
-| `AUTH_FAILURE_SPIKE` | IP | Una IP superó `AUTH_FAILURES_PER_MINUTE_PER_IP` fallos de autenticación | Si es un producto propio, su key está mal configurada; si no, posible fuerza bruta (docs/08 §4) |
+| `QUEUE_AGE` | `queue` | The oldest eligible message has waited longer than `QUEUE_AGE_ALERT_SECONDS` (300 s) | Check that workers are alive, the circuit breaker and `/actuator/health` |
+| `FAILED_RATE` | `all-tenants` | More than 5 % of the last hour's messages are `FAILED` (with at least 20) | Group by `failure_code` (docs/06 §4) |
+| `TENANT_PAUSED` | tenant slug (or id) | Automatic pause: volume, bounces, complaints (FR-34) or unverified domain | Review with the tenant's owner; resume with `POST /admin/v1/tenants/{slug}/resume-sending` |
+| `CIRCUIT_BREAKER_OPEN` | `provider` | The provider has not accepted sends for more than 10 minutes | Check Resend's status; the queue waits without losing attempts |
+| `PROVIDER_CONFIGURATION` | Resend error code | The API key or its permissions are wrong (`401`, a key-related `403`) | Rotate or fix `RESEND_API_KEY` |
+| `LOST_LOCK` | `worker` | A worker lost a message's lock before closing it | Look for long worker pauses, or review `LOCK_TIMEOUT_SECONDS` |
+| `IDEMPOTENCY_CONFLICT` | message id | The provider saw the same id with a different body: non-deterministic render (AC-12.7) | Review the template and the version pinned to the message |
+| `COMPLAINT_RATE` | tenant slug | 7-day complaint rate above 0.1 % | Review the tenant's content and recipients before it reaches the pause threshold |
+| `AUTH_FAILURE_SPIKE` | IP | An IP exceeded `AUTH_FAILURES_PER_MINUTE_PER_IP` authentication failures | If it is one of your applications, its key is misconfigured; if not, possible brute force (docs/08 §4) |
 
-**Salud.**
-- `/actuator/health/liveness` y `/actuator/health/readiness` son las sondas del orquestador.
-- `/actuator/health` agrega además `queue` y `provider`. Este último solo existe en el rol worker.
-- `DEGRADED` responde `200`: avisa sin reiniciar instancias sanas. `provider` en `DOWN` (breaker abierto o error de configuración) sí responde `503` en `/actuator/health`, pero no afecta a las sondas.
+**Health.**
+- `/actuator/health/liveness` and `/actuator/health/readiness` are the orchestrator probes.
+- `/actuator/health` also aggregates `queue` and `provider`; the latter exists only in the worker role.
+- `DEGRADED` answers `200`: it warns without restarting healthy instances. `provider` `DOWN` (open breaker or configuration error) answers `503` on `/actuator/health`, but does not affect the probes.
 
-**Retención y borrado.**
-- Las purgas corren solas en el worker (docs/06 §8): variables, idempotencia, retención por tenant, contenido renderizado, huérfanos, contadores y auditoría.
-- Un titular se borra con `POST /admin/v1/data-subjects/erase`, siguiendo el procedimiento completo de docs/08 §6, que incluye pedir el borrado a Resend y responder en plazo.
+**Retention and erasure.**
+- Purges run on their own in the worker (docs/06 §8). They cover variables, idempotency keys, per-tenant retention, rendered content, orphans, counters and audit entries.
+- A data subject is erased with `POST /admin/v1/data-subjects/erase`, following the full procedure in docs/08 §6, which includes asking Resend to delete the data and answering within the legal deadline.
 
-## Plantillas como código
+## Templates as code
 
-Las plantillas viven en este repositorio y se publican por la API ([`docs/05`](docs/05-arquitectura.md) §9):
+Templates are kept as folders and published through the API ([`docs/05`](docs/05-architecture.md) §9). The examples live in this repository; an application can keep its own templates in its own repository.
 
 ```
 templates/{tenant}/{templateKey}/
-├── template.json     # key, name, category, subject por locale, variablesSchema, previewVariables
-├── es-CR.html        # un .html por locale (obligatorio)
-├── es-CR.txt         # texto plano (opcional)
+├── template.json     # key, name, category, subject per locale, variablesSchema, previewVariables
+├── es-CR.html        # one .html per locale (required)
+├── es-CR.txt         # plain text (optional)
 ├── en.html
 └── en.txt
 ```
@@ -180,34 +272,33 @@ templates/{tenant}/{templateKey}/
 ```bash
 EMAIL_SERVICE_TEMPLATES_KEY=esk_test_... ./scripts/publish-template.sh demo password-reset
 
-# Desde el repositorio de un producto, con la carpeta de su plantilla:
+# From an application's repository, with the path of its template folder:
 EMAIL_SERVICE_TEMPLATES_KEY=esk_test_... EMAIL_SERVICE_URL=http://localhost:8080 \
   ../email-service/scripts/publish-template.sh emails/password-reset
 ```
 
-El script:
-- crea la plantilla si no existe;
-- omite los locales sin cambios;
-- crea los borradores y los previsualiza con `previewVariables`;
-- publica solo si todas las previsualizaciones pasan; si algo falla, borra los borradores que creó.
+The script:
+- creates the template if it does not exist;
+- skips locales with no changes;
+- creates the drafts and previews them with `previewVariables`;
+- publishes only if every preview passes; if anything fails, it deletes the drafts it created;
+- when several locales changed, publishes them all in one operation (ADR-0020), so the required variables of a multi-locale template can change.
 
-- Con varios idiomas cambiados, los publica todos en una sola operación (ADR-0020), lo que permite cambiar las variables obligatorias de una plantilla multilingüe.
+The key must be an operator key (`templates:write` and `emails:read`), never the one deployed with an application. In CI, `TemplatesAsCodeTest` validates every template with the same rules as the service.
 
-La key debe ser de operador (`templates:write` y `emails:read`), nunca la que se despliega en un producto. En CI, `TemplatesAsCodeTest` valida cada plantilla con las mismas reglas que el servicio.
+CI does not use mise or `jq`: `setup-java` installs Java, and no job runs the scripts. `jq` is needed only for the scripts in local development; `mise install` installs it, and GitHub's runners already include it.
 
-El CI no usa mise ni `jq`: Java lo instala `setup-java` y ningún job ejecuta los scripts. `jq` solo hace falta en local para los scripts; lo instala `mise install`, y en los runners de GitHub ya viene incluido.
+Template rules (ADR-0011):
+- logic-less Handlebars;
+- only `if`, `unless`, `each`, `with`, `formatDate`, `formatNumber` and `formatMoney`;
+- no `{{{ }}}`, no `{{& }}` and no partials;
+- HTML escaped in the body;
+- URL variables declared with `"format": "uri"`, using `https` and a host from the tenant's `allowedLinkHosts`. With `APP_ENV=local` only, links to `localhost` and `*.localhost` are accepted too (ADR-0021).
 
-Reglas de las plantillas (ADR-0011):
-- Handlebars *logic-less*;
-- solo `if`, `unless`, `each`, `with`, `formatDate`, `formatNumber` y `formatMoney`;
-- sin `{{{ }}}`, `{{& }}` ni parciales;
-- HTML escapado en el cuerpo;
-- variables URL con `"format": "uri"`, `https` y un host de `allowedLinkHosts` del tenant.
+## Branches
 
-## Ramas
+- `main`: always deployable.
+- `dev`: integration.
+- `feat/*` and `fix/*`: one branch per milestone or large change.
 
-- `main`: siempre desplegable.
-- `dev`: integración.
-- `feat/*`: una rama por hito.
-
-Detalle en [`AGENTS.md`](AGENTS.md#branching).
+Details in [`AGENTS.md`](AGENTS.md#branching).

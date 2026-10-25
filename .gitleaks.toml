@@ -1,10 +1,15 @@
-# Default gitleaks rules, plus one narrow exception: the fictional local-development webhook secret
-# in .env.example, by its exact value. Any other secret, in any file, is still reported.
+# Default gitleaks rules, plus narrow exceptions by exact value: the fictional local-development
+# webhook secret in .env.example and the fictional example key in docs/07-internal-api.md. Any other
+# secret, in any file, is still reported.
 # The single [allowlist] table, not [[allowlists]]: older gitleaks versions ignore the newer form.
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Fictional local webhook secret in .env.example, used by scripts/simulate-event.sh"
+description = "Fictional values: the local webhook secret in .env.example and the docs/07 example key"
 regexTarget = "match"
-regexes = ['''whsec_bG9jYWwtZGV2LXdlYmhvb2stc2VjcmV0LW5vdC1yZWFs''']
+regexes = [
+  '''whsec_bG9jYWwtZGV2LXdlYmhvb2stc2VjcmV0LW5vdC1yZWFs''',
+  '''esk_live_7fA2kQ9z(_3xK9mQ2vL8pR4tW6yB1nC5dF7gH0jA2sE4uI6oP8qZr)?''',
+  '''password-reset:3f9c2a71-5d1e-4b8a-9e44-2f7a1e5d8b90''',
+]

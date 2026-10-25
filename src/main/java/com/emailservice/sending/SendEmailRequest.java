@@ -20,7 +20,7 @@ public record SendEmailRequest(
 		@Size(max = 5) List<String> bcc,
 		@Schema(description = "Sender address; its domain must be in the tenant's allowedFromDomains (AC-09.2)")
 		String from,
-		@Schema(example = "Pulpería La Esquina vía Colmena") String fromName,
+		@Schema(example = "Café Aurora via Acme") String fromName,
 		String replyTo,
 		@Schema(type = "object") @NotNull JsonNode variables,
 		@Size(max = 10) List<String> tags,

@@ -1,7 +1,7 @@
 # Local development only (docs/05 §7): app + PostgreSQL with the three roles + Mailpit.
 # Usage: cp .env.example .env && docker compose up --build
 # Other local projects join the network email-service-net and call http://email-service:8080
-# (docs/12-estado-y-uso-local.md).
+# (docs/12-status-and-local-use.md).
 
 services:
   postgres:
