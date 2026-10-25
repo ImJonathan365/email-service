@@ -205,9 +205,9 @@ class EmailAcceptanceTest extends IntegrationTest {
 
 	@Test
 	void ac_09_5_fromNameOverridesOnlyTheDisplayName() throws Exception {
-		HttpResponse<String> ok = a.send(a.body("\"fromName\": \"Pulpería La Esquina vía Colmena\""), null);
+		HttpResponse<String> ok = a.send(a.body("\"fromName\": \"Café Aurora via Acme\""), null);
 		JsonNode row = row(UUID.fromString(json(ok).get("id").stringValue()));
-		assertThat(row.get("from_name").stringValue()).isEqualTo("Pulpería La Esquina vía Colmena");
+		assertThat(row.get("from_name").stringValue()).isEqualTo("Café Aurora via Acme");
 		assertThat(row.get("from_email").stringValue()).isEqualTo("no-reply@sender.test");
 
 		for (String bad : new String[] { "Evil <evil@x.test>", "x".repeat(81), "a@b" }) {

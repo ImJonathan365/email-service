@@ -58,10 +58,10 @@ class SmtpEmailSenderTest {
 	}
 
 	static OutboundEmail email(UUID id) {
-		return new OutboundEmail(id, new OutboundEmail.Address("no-reply@demo.localhost", "Demo vía Colmena"),
+		return new OutboundEmail(id, new OutboundEmail.Address("no-reply@demo.localhost", "Café Aurora via Acme"),
 				new OutboundEmail.Address("support@demo.localhost", null), new OutboundEmail.Address("ana@example.test", "Ana"),
-				List.of("cc@example.test"), List.of("bcc@example.test"), "Hola Ana & Juan",
-				"<p>Hola Ana &amp; Juan</p>", "Hola Ana & Juan", List.of("password-reset"));
+				List.of("cc@example.test"), List.of("bcc@example.test"), "Hi Ana & Juan",
+				"<p>Hi Ana &amp; Juan</p>", "Hi Ana & Juan", List.of("password-reset"));
 	}
 
 	@Test
@@ -80,10 +80,10 @@ class SmtpEmailSenderTest {
 		}
 		assertThat(mailpitId).as("message with Message-ID %s in Mailpit", id).isNotNull();
 		JsonNode message = get(api + "/message/" + mailpitId);
-		assertThat(message.get("Subject").stringValue()).isEqualTo("Hola Ana & Juan");
-		assertThat(message.get("HTML").stringValue()).contains("<p>Hola Ana &amp; Juan</p>");
-		assertThat(message.get("Text").stringValue()).contains("Hola Ana & Juan");
-		assertThat(message.get("From").get("Name").stringValue()).isEqualTo("Demo vía Colmena");
+		assertThat(message.get("Subject").stringValue()).isEqualTo("Hi Ana & Juan");
+		assertThat(message.get("HTML").stringValue()).contains("<p>Hi Ana &amp; Juan</p>");
+		assertThat(message.get("Text").stringValue()).contains("Hi Ana & Juan");
+		assertThat(message.get("From").get("Name").stringValue()).isEqualTo("Café Aurora via Acme");
 		assertThat(message.get("MessageID").stringValue()).isEqualTo(id + "@email-service");
 		assertThat(message.get("Cc").get(0).get("Address").stringValue()).isEqualTo("cc@example.test");
 	}

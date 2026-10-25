@@ -3,8 +3,9 @@
 Internal, centralized **transactional** email microservice used by my own products
 (PipeMend, Colmena, Chinamo, Payverica). Not a SaaS, not a marketing platform.
 
-**Source of truth: `/docs` (Spanish).** Read `docs/10-guia-para-agentes-ia.md` before any change,
-and the specific requirement in `docs/02-requisitos-funcionales.md`. If code and `/docs` disagree, `/docs` wins.
+**Source of truth: `/docs`.** Read `docs/10-ai-agent-guide.md` before any change,
+and the specific requirement in `docs/02-functional-requirements.md`. If code and `/docs` disagree, `/docs` wins.
+Project status and how to pick up the work: `docs/12-status-and-local-use.md`.
 ADR-0008…0014 and 0016…0021 are Accepted (0019 supersedes the API key cache of 0017; 0020 adds joint multi-locale publication to 0018; 0021 accepts localhost links only with `APP_ENV=local`); ADR-0015 (attachments) is Rejected — no attachments in the MVP.
 
 ## Hard rules (no change without owner approval + ADR in docs/adr)
@@ -38,7 +39,7 @@ ADR-0008…0014 and 0016…0021 are Accepted (0019 supersedes the API key cache 
 
 ## Code style
 
-- Code, identifiers, logs, commit messages and API messages in English.
+- Everything in English: code, identifiers, logs, commit messages, API messages and `/docs`. The only Spanish left is localized content, such as the `es-CR` templates and their test fixtures.
 - Comments in English, short, and only where the intent is not obvious from the code (explain why, not what). Do not comment every class, method or line. No decorative comment blocks, no restating method names.
 - No emojis anywhere: code, comments, logs, commit messages, PR descriptions, docs.
 - Prefer `record` over Lombok; explicit data access, no ORM magic.
