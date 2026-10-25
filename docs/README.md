@@ -1,74 +1,76 @@
-# email-service — Documentación base
+# email-service — Base documentation
 
-Microservicio interno y centralizado de envío de correo **transaccional** para mis productos: PipeMend (pipeline ETL con IA), Colmena (SaaS de administración de negocios), Chinamo (POS) y Payverica (verificación de pagos SINPE). Un solo servicio multi-tenant, con plantillas propias por producto, envío asíncrono, trazabilidad completa y aislamiento garantizado por la base de datos.
+An internal, centralized **transactional** email microservice for my products: PipeMend (AI-powered ETL pipeline), Colmena (business management SaaS), Chinamo (POS) and Payverica (SINPE payment verification). A single multi-tenant service, with each product's own templates, asynchronous sending, full traceability and isolation guaranteed by the database.
 
-> Esta carpeta es la **fuente de verdad** del proyecto. Cualquier colaborador (humano o modelo de IA) debe leerla antes de escribir código. Si el código y estos documentos se contradicen, mandan los documentos hasta que se apruebe un cambio mediante un ADR.
+> This folder is the project's **source of truth**. Every contributor (human or AI model) must read it before writing code. If the code and these documents contradict each other, the documents win until a change is approved through an ADR.
 
-> **Estado (2026-10-05):** documentación revisada tras la auditoría (`auditoria/`). El owner aceptó los ADR-0008 a 0014, 0016, 0017 y 0018, rechazó el 0015 (adjuntos) y respondió las preguntas abiertas. **H0 cerrado: se puede empezar H1.**
+> **Status (2026-10-05):** documentation reviewed after the audit (`audit/`). The owner accepted ADR-0008 to 0014, 0016, 0017 and 0018, rejected 0015 (attachments) and answered the open questions. **H0 closed: H1 can start.** The current status is in [12-status-and-local-use.md](12-status-and-local-use.md).
 
-## Índice
+> **(rev. 2026-10-25)** The documentation was translated from Spanish to English; IDs, section numbers and decisions did not change.
 
-| Archivo | Contenido |
+## Index
+
+| File | Content |
 |---|---|
-| [01-vision-y-alcance.md](01-vision-y-alcance.md) | Problema, productos consumidores, objetivos, casos de uso, in-scope / out-of-scope del MVP |
-| [02-requisitos-funcionales.md](02-requisitos-funcionales.md) | FR-xx con criterios de aceptación Dado/Cuando/Entonces; máquina de estados y mapeo de eventos |
-| [03-requisitos-no-funcionales.md](03-requisitos-no-funcionales.md) | NFR-xx medibles (rendimiento, fiabilidad, aislamiento, privacidad, cumplimiento) |
-| [04-stack-tecnologico.md](04-stack-tecnologico.md) | Stack, proveedor de correo y protocolo de entrada, con justificación, comparativas y medidas |
-| [05-arquitectura.md](05-arquitectura.md) | Componentes, flujo de envío, reintentos, tareas, configuración, despliegue |
-| [06-modelo-de-datos.md](06-modelo-de-datos.md) | Entidades, DDL de referencia con RLS, consultas de la cola, retención |
-| [07-api-interna.md](07-api-interna.md) | Especificación de la API, catálogo de errores y contrato de integración para los productos |
-| [08-seguridad.md](08-seguridad.md) | Secretos, autenticación, anti-abuso, aislamiento, privacidad, Ley 8968, incidentes |
-| [09-roadmap.md](09-roadmap.md) | Fases: MVP y mejoras posteriores con disparadores medibles |
-| [10-guia-para-agentes-ia.md](10-guia-para-agentes-ia.md) | Contexto y reglas para modelos de IA que asistan en el desarrollo |
-| [11-correo-masivo.md](11-correo-masivo.md) | Correo masivo y marketing: por qué todavía no, disparador, separación obligatoria y requisitos |
-| [12-estado-y-uso-local.md](12-estado-y-uso-local.md) | Estado del proyecto (hitos, H9, Fase 0, decisiones pendientes) y guía para usar el servicio desde otros proyectos en local |
-| [adr/](adr/) | Architecture Decision Records (decisiones y su porqué) |
-| [auditoria/](auditoria/) | Informe de auditoría del 2026-10-05, resumen de decisiones y preguntas abiertas |
-| [CHANGELOG.md](CHANGELOG.md) | Registro de avance y decisiones |
+| [01-vision-and-scope.md](01-vision-and-scope.md) | Problem, consuming products, goals, use cases, MVP in-scope / out-of-scope |
+| [02-functional-requirements.md](02-functional-requirements.md) | FR-xx with Given/When/Then acceptance criteria; state machine and event mapping |
+| [03-non-functional-requirements.md](03-non-functional-requirements.md) | Measurable NFR-xx (performance, reliability, isolation, privacy, compliance) |
+| [04-technology-stack.md](04-technology-stack.md) | Stack, email provider and intake protocol, with justification, comparisons and measurements |
+| [05-architecture.md](05-architecture.md) | Components, sending flow, retries, tasks, configuration, deployment |
+| [06-data-model.md](06-data-model.md) | Entities, reference DDL with RLS, queue queries, retention |
+| [07-internal-api.md](07-internal-api.md) | API specification, error catalogue and integration contract for the products |
+| [08-security.md](08-security.md) | Secrets, authentication, anti-abuse, isolation, privacy, Law 8968, incidents |
+| [09-roadmap.md](09-roadmap.md) | Phases: MVP and later improvements with measurable triggers |
+| [10-ai-agent-guide.md](10-ai-agent-guide.md) | Context and rules for AI models assisting in development |
+| [11-bulk-email.md](11-bulk-email.md) | Bulk and marketing email: why not yet, trigger, mandatory separation and requirements |
+| [12-status-and-local-use.md](12-status-and-local-use.md) | Project status (milestones, H9, Phase 0, pending decisions) and a guide for using the service from other projects locally |
+| [adr/](adr/) | Architecture Decision Records (decisions and their reasons) |
+| [audit/](audit/) | Audit report of 2026-10-05, decision summary and open questions |
+| [CHANGELOG.md](CHANGELOG.md) | Record of progress and decisions |
 
-## Resumen en 12 líneas
+## Summary in 13 lines
 
-- **Un solo servicio** (API + worker en el mismo artefacto, escalables por separado) + **PostgreSQL** propio. Sin microservicios adicionales ni broker externo en el MVP.
-- **Multi-tenant con doble barrera**: cada producto es un *tenant* con sus API keys (con ámbitos), plantillas, límites y dominio remitente; `tenant_id` en cada consulta **y** Row Level Security en la base de datos.
-- **Envío asíncrono**: la API encola y responde `202` en milisegundos; un worker envía por prioridad (`SECURITY` > `TRANSACTIONAL` > `NOTICE`) con reintentos, backoff y *fencing*.
-- **Proveedor transaccional por API** (**Resend**; alternativas evaluadas: Postmark y Amazon SES) detrás de `EmailSender`/`WebhookVerifier`.
-- **Sin duplicados en la práctica**: `Idempotency-Key` del cliente + `Idempotency-Key = message.id` hacia el proveedor (24 h); semántica al menos una vez.
-- **Desarrollo local con Mailpit** (SMTP) cambiando una variable de entorno, sin cambiar la arquitectura.
-- **Idempotencia exigida por contrato** con `Idempotency-Key` derivada del evento de dominio del producto.
-- **Webhooks entrantes** firmados (Svix) actualizan el estado: entregado, rebote, queja, demora, fallo, supresión.
-- **Supresión global** para rebotes duros y quejas (como hace el proveedor) y **por tenant** para bajas manuales.
-- **Plantillas seguras**: *logic-less*, escapado por contexto, linter HTML, enlaces solo a hosts del producto.
-- **Secretos solo en variables de entorno / secrets manager**; en la base de datos solo hashes de API keys.
-- **Sin lógica de negocio de ningún producto** dentro del servicio, **sin correo masivo** (ADR-0013) y **sin adjuntos** (enlaces firmados en su lugar).
-- **Idiomas:** español (`es-CR`) por defecto e inglés disponible por mensaje (ADR-0018).
+- **A single service** (API + worker in the same artifact, scalable separately) + its own **PostgreSQL**. No extra microservices or external broker in the MVP.
+- **Multi-tenant with a double barrier**: each product is a *tenant* with its API keys (with scopes), templates, limits and sending domain; `tenant_id` in every query **and** Row Level Security in the database.
+- **Asynchronous sending**: the API enqueues and answers `202` in milliseconds; a worker sends by priority (`SECURITY` > `TRANSACTIONAL` > `NOTICE`) with retries, backoff and fencing.
+- **A transactional provider over its API** (**Resend**; alternatives evaluated: Postmark and Amazon SES) behind `EmailSender`/`WebhookVerifier`.
+- **No duplicates in practice**: the client's `Idempotency-Key` + `Idempotency-Key = message.id` towards the provider (24 h); at-least-once semantics.
+- **Local development with Mailpit** (SMTP) by changing one environment variable, without changing the architecture.
+- **Idempotency required by contract**, with an `Idempotency-Key` derived from the product's domain event.
+- **Signed incoming webhooks** (Svix) update the state: delivered, bounced, complained, delayed, failed, suppressed.
+- **Global suppression** for hard bounces and complaints (as the provider does) and **per tenant** for manual unsubscribes.
+- **Secure templates**: logic-less, context-aware escaping, an HTML linter, links only to the product's hosts.
+- **Secrets only in environment variables / a secrets manager**; in the database only API key hashes.
+- **No business logic of any product** inside the service, **no bulk email** (ADR-0013) and **no attachments** (signed links instead).
+- **Locales:** Spanish (`es-CR`) by default and English available per message (ADR-0018).
 
-## Jerarquía de autoridad
+## Hierarchy of authority
 
-1. ADR con estado `Accepted` (`adr/`).
-2. Documentos numerados de esta carpeta.
-3. Código y comentarios del repositorio.
-4. Instrucciones puntuales en un chat (si contradicen 1–2, **consultar al owner** antes de actuar).
+1. ADRs with status `Accepted` (`adr/`).
+2. The numbered documents in this folder.
+3. The repository's code and comments.
+4. One-off instructions in a chat (if they contradict 1–2, **ask the owner** before acting).
 
-~~Regla transitoria (2026-10-05)~~: ya no aplica; todos los ADR de la auditoría tienen un estado decidido.
+~~Transitional rule (2026-10-05)~~: no longer applies; every ADR from the audit has a decided status.
 
-## Glosario
+## Glossary
 
-| Término | Definición |
+| Term | Definition |
 |---|---|
-| **Tenant / servicio origen** | Producto que usa el email-service (p. ej. `colmena`). Unidad de aislamiento: API keys, plantillas, límites, supresiones manuales y envíos son siempre de un tenant. |
-| **Mensaje (`email_message`)** | Un envío individual solicitado por un tenant. Tiene estado, prioridad, intentos y trazabilidad. También es el trabajo en cola. |
-| **Plantilla / versión** | Plantilla identificada por `key` dentro del tenant, con categoría; sus versiones publicadas son inmutables. |
-| **Categoría** | `SECURITY` (verificación, recuperación, códigos), `TRANSACTIONAL` (recibos, comprobantes, pagos) o `NOTICE` (avisos operativos). Determina la prioridad y si se permite el seguimiento. |
-| **Ámbito (scope)** | Permiso de una API key: `emails:send`, `emails:read`, `templates:write`, `suppressions:write`. |
-| **Proveedor** | Servicio externo que entrega el correo (Resend, Postmark, SES) o el SMTP local de desarrollo. |
-| **Evento** | Hecho reportado por el proveedor vía webhook (sent, delivered, delivery_delayed, bounced, complained, failed, suppressed, opened, clicked). |
-| **Supresión** | Dirección bloqueada: **global** tras un rebote duro, una queja o una supresión del proveedor; **por tenant** si es manual. |
-| **Pausa** | Estado de un tenant cuyo envío se detuvo por una anomalía (volumen, rebotes, quejas); sus mensajes quedan retenidos y solo un administrador la levanta. |
-| **Worker** | Proceso que toma mensajes encolados de PostgreSQL y los envía. Mismo artefacto que la API, distinto perfil. |
-| **Idempotency-Key** | Clave enviada por el cliente para que un reintento de la misma solicitud no genere un segundo correo; el servicio usa a su vez el `id` del mensaje como clave de idempotencia hacia el proveedor. |
-| **lock_token** | *Fencing token* de cada toma de un mensaje; impide que un worker que perdió el lock cierre o reenvíe el mensaje. |
-| **RLS** | Row Level Security de PostgreSQL: la base de datos filtra por `app.tenant_id` aunque el código olvide hacerlo. |
+| **Tenant / source service** | A product that uses the email-service (e.g. `colmena`). The unit of isolation: API keys, templates, limits, manual suppressions and sends always belong to a tenant. |
+| **Message (`email_message`)** | An individual send requested by a tenant. It has a state, a priority, attempts and traceability. It is also the queued job. |
+| **Template / version** | A template identified by `key` within the tenant, with a category; its published versions are immutable. |
+| **Category** | `SECURITY` (verification, recovery, codes), `TRANSACTIONAL` (receipts, invoices, payments) or `NOTICE` (operational notices). It determines the priority and whether tracking is allowed. |
+| **Scope** | A permission of an API key: `emails:send`, `emails:read`, `templates:write`, `suppressions:write`. |
+| **Provider** | The external service that delivers the email (Resend, Postmark, SES) or the local development SMTP. |
+| **Event** | A fact reported by the provider through a webhook (sent, delivered, delivery_delayed, bounced, complained, failed, suppressed, opened, clicked). |
+| **Suppression** | A blocked address: **global** after a hard bounce, a complaint or a provider suppression; **per tenant** if it is manual. |
+| **Pause** | The state of a tenant whose sending stopped because of an anomaly (volume, bounces, complaints); its messages are held and only an administrator lifts it. |
+| **Worker** | The process that claims queued messages from PostgreSQL and sends them. The same artifact as the API, a different profile. |
+| **Idempotency-Key** | A key sent by the client so that a retry of the same request does not produce a second email; the service in turn uses the message's `id` as the idempotency key towards the provider. |
+| **lock_token** | The fencing token of each claim of a message; it prevents a worker that lost the lock from closing or resending the message. |
+| **RLS** | PostgreSQL's Row Level Security: the database filters by `app.tenant_id` even if the code forgets to. |
 
-## Datos que recibe el proveedor de correo (encargado del tratamiento)
+## Data the email provider receives (data processor)
 
-Para cada envío, Resend (EE. UU.) recibe: la dirección y el nombre del destinatario (`to`, `cc`, `bcc`), el remitente y el `reply-to`, el asunto y el cuerpo renderizados (que pueden contener datos personales de las variables), las etiquetas (`tags`) y el `message_id` interno como etiqueta. El proveedor conserva estos datos según su plan (30 días según su página de precios consultada el 2026-10-05; a confirmar por plan). Cada producto debe cubrir esta transferencia en su aviso de privacidad (Ley 8968, art. 14).
+For each send, Resend (US) receives: the recipient's address and name (`to`, `cc`, `bcc`), the sender and the `reply-to`, the rendered subject and body (which can contain personal data from the variables), the tags (`tags`) and the internal `message_id` as a tag. The provider keeps this data according to its plan (30 days according to its pricing page checked on 2026-10-05; to be confirmed per plan). Each product must cover this transfer in its privacy notice (Law 8968, art. 14).
