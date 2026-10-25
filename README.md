@@ -1,8 +1,21 @@
-# email-service
+<h1 align="center">email-service</h1>
 
-A self-hosted, multi-tenant service for **transactional** email: password resets, verification links, receipts, notifications. Applications call one HTTP API. The service validates and renders the email from a versioned template, queues it in PostgreSQL, sends it through an email provider and tracks what happens to it afterwards. It is not a marketing or bulk-email platform.
+<p align="center">
+  A self-hosted, multi-tenant service for <b>transactional</b> email.<br>
+  One HTTP API for your applications; templates, queueing, delivery and tracking behind it.
+</p>
 
-The design documentation, in Spanish, lives in [`docs/`](docs/README.md) and is the source of truth. Rules for AI assistants are in [`AGENTS.md`](AGENTS.md). Project status and a guide for using the service from other projects in local development: [`docs/12-estado-y-uso-local.md`](docs/12-estado-y-uso-local.md).
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#running-locally">Running locally</a> ·
+  <a href="#templates-as-code">Templates</a> ·
+  <a href="docs/README.md">Design docs</a> ·
+  <a href="contracts/email-service.openapi.json">API contract</a>
+</p>
+
+Password resets, verification links, receipts, notifications: applications call one HTTP API. The service validates and renders the email from a versioned template, queues it in PostgreSQL, sends it through an email provider and tracks what happens to it afterwards. It is not a marketing or bulk-email platform.
+
+The design documentation lives in [`docs/`](docs/README.md) and is the source of truth. Rules for AI assistants are in [`AGENTS.md`](AGENTS.md). Project status and a guide for using the service from other projects in local development: [`docs/12-status-and-local-use.md`](docs/12-status-and-local-use.md).
 
 ## What it does
 
@@ -37,11 +50,43 @@ The design documentation, in Spanish, lives in [`docs/`](docs/README.md) and is 
 
 ## How it works
 
-```
-client ── POST /v1/emails ──> api ──> email_message (PostgreSQL) <── worker ──> provider (Resend)
-                                                                                     │
-client <── GET /v1/emails/{id} ── api <── POST /webhooks/resend ── delivery events ──┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/flow-dark.svg">
+  <img alt="Your application calls the API, which validates the request and enqueues the message in PostgreSQL. A worker claims it and sends it through Resend. Resend reports delivery events back to the API through a signed webhook, and the application reads the state with GET /v1/emails/{id}." src="docs/assets/flow-light.svg" width="100%">
+</picture>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Where</th><th>What happens</th><th>Message state</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td><b>Your application</b></td>
+      <td><code>POST /v1/emails</code> with a template key, the recipient, the variables and an <code>Idempotency-Key</code> derived from the event that caused the email.</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>2</td><td><b>API</b></td>
+      <td>Authenticates the key and its scopes, checks idempotency, validates the variables and links, renders the template once as a check, applies suppressions and the rate limit, and stores the message. It answers <code>202</code> without calling the provider.</td>
+      <td><code>QUEUED</code></td>
+    </tr>
+    <tr>
+      <td>3</td><td><b>Worker</b></td>
+      <td>Claims due messages by priority in a short transaction, renders the pinned template version and sends it with <code>Idempotency-Key = message.id</code>. A transient failure is retried with backoff.</td>
+      <td><code>SENDING</code> → <code>SENT</code></td>
+    </tr>
+    <tr>
+      <td>4</td><td><b>Resend → API</b></td>
+      <td>Signed webhooks report what happened. Precedence rules keep late events from moving a message backwards; bounces and complaints suppress the address for every tenant.</td>
+      <td><code>DELIVERED</code>, <code>BOUNCED</code>, <code>COMPLAINED</code> or <code>FAILED</code></td>
+    </tr>
+    <tr>
+      <td>5</td><td><b>Your application</b></td>
+      <td><code>GET /v1/emails/{id}</code> returns the state and the event history. A queued message can still be cancelled.</td>
+      <td><code>CANCELED</code> if cancelled while queued</td>
+    </tr>
+  </tbody>
+</table>
 
 - **One artifact, several roles.** One deployable runs as `APP_ROLE=api`, `worker`, `all` or `migrate`, against one PostgreSQL database. There is no broker, cache or second service.
 - **The queue is a table.**
@@ -74,7 +119,7 @@ Seed and data behaviour:
 - `SLUG=my-app ./scripts/seed-local.sh` creates a tenant for another application.
 - `docker compose down -v` deletes the database, including tenants, keys and templates.
 
-Applications running in Docker reach the service at `http://email-service:8080` through the `email-service-net` network ([`docs/12`](docs/12-estado-y-uso-local.md)).
+Applications running in Docker reach the service at `http://email-service:8080` through the `email-service-net` network ([`docs/12`](docs/12-status-and-local-use.md)).
 
 | URL | What it is |
 |---|---|
@@ -213,7 +258,7 @@ Then:
 
 ## Templates as code
 
-Templates are kept as folders and published through the API ([`docs/05`](docs/05-arquitectura.md) §9). The examples live in this repository; an application can keep its own templates in its own repository.
+Templates are kept as folders and published through the API ([`docs/05`](docs/05-architecture.md) §9). The examples live in this repository; an application can keep its own templates in its own repository.
 
 ```
 templates/{tenant}/{templateKey}/
